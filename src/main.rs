@@ -79,6 +79,8 @@ async fn handle_client(
                                 let _ = w.write_all(serialized.as_bytes()).await;
                                 let _ = w.write_all(b"\n").await;
                                 let _ = w.flush().await;
+                            } else {
+                                xprintln!("Wont print bc destination isn't equal your name")
                             }
                         } else {
                             if msg.from.name != user {
@@ -87,6 +89,8 @@ async fn handle_client(
                                 let _ = w.write_all(serialized.as_bytes()).await;
                                 let _ = w.write_all(b"\n").await;
                                 let _ = w.flush().await;
+                            } else {
+                                xprintln!("Bc ", user ; Debug, " is the sender")
                             }
                         }
                     }
