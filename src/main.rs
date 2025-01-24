@@ -1,81 +1,29 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncWriteExt, BufReader, AsyncBufReadExt};
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc};
 use serde::{Serialize, Deserialize};
 use std::error::Error;
 use std::sync::Arc;
-use std::collections::HashMap;
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct User {
-    username: String,
-}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Message {
-    from: User,
-    to: Option<User>, // None means broadcast to all
+    username: String,
     content: String,
 }
 
-#[derive(Debug)]
-struct UserConnection {
-    user: User,
-    writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+#[derive(Debug, Clone)]
+struct User {
+    username: String,
+    writer: Arc<tokio::sync::Mutex<tokio::net::tcp::OwnedWriteHalf>>,
 }
 
-#[derive(Debug)]
-struct UserManager {
-    users: Arc<Mutex<HashMap<String, UserConnection>>>,
-}
-
-impl UserManager {
-    fn new() -> Self {
-        UserManager {
-            users: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    async fn add_user(&self, user: User, writer: tokio::net::tcp::OwnedWriteHalf) {
-        let user_conn = UserConnection {
-            user: user.clone(),
-            writer: Arc::new(Mutex::new(writer)),
-        };
-        self.users.lock().await.insert(user.username.clone(), user_conn);
-    }
-
-    async fn remove_user(&self, username: &str) {
-        self.users.lock().await.remove(username);
-    }
-
-    async fn send_message(&self, message: Message) -> Result<(), Box<dyn Error>> {
-        let users = self.users.lock().await;
-        match message.to.clone() {
-            Some(to_user) => {
-                if let Some(user_conn) = users.get(&to_user.username) {
-                    let serialized = serde_json::to_string(&message)?;
-                    let mut writer = user_conn.writer.lock().await;
-                    writer.write_all(serialized.as_bytes()).await?;
-                    writer.write_all(b"\n").await?;
-                }
-            }
-            None => {
-                for user_conn in users.values() {
-                    let serialized = serde_json::to_string(&message)?;
-                    let mut writer = user_conn.writer.lock().await;
-                    writer.write_all(serialized.as_bytes()).await?;
-                    writer.write_all(b"\n").await?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
+use std::collections::HashMap;
+use tokio::sync::Mutex;
 
 async fn handle_client(
     socket: TcpStream,
-    user_manager: Arc<UserManager>,
-    tx: broadcast::Sender<Message>
+    tx: broadcast::Sender<Message>,
+    users: Arc<Mutex<HashMap<String, User>>>,
 ) -> Result<(), Box<dyn Error>> {
     let (reader, writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
@@ -84,34 +32,59 @@ async fn handle_client(
     reader.read_line(&mut username).await?;
     let username = username.trim().to_string();
 
-    let user = User { username: username.clone() };
-    user_manager.add_user(user.clone(), writer).await;
+    // Add the user to the shared users list
+    let user_writer = Arc::new(tokio::sync::Mutex::new(writer));
+    {
+        let mut users_lock = users.lock().await;
+        users_lock.insert(
+            username.clone(),
+            User {
+                username: username.clone(),
+                writer: Arc::clone(&user_writer),
+            },
+        );
+    }
 
     let connect_msg = Message {
-        from: User { username: "Server".to_string() },
-        to: None,
+        username: "Server".to_string(),
         content: format!("{} joined the chat", username),
     };
     tx.send(connect_msg).ok();
 
     let mut rx = tx.subscribe();
+    let writer = Arc::clone(&user_writer);
 
-    let receive_task = {
-        let user_manager = Arc::clone(&user_manager);
-        let _username = username.clone();
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(msg) => {
-                        if let Err(e) = user_manager.send_message(msg).await {
-                            eprintln!("Error sending message: {}", e);
+    let receive_task = tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(msg) => {
+                    if let Some(target) = msg.content.strip_prefix("@") {
+                        // Direct message handling
+                        if let Some((target_user, message)) = target.split_once(' ') {
+                            let users_lock = users.lock().await;
+                            if let Some(user) = users_lock.get(target_user) {
+                                let mut target_writer = user.writer.lock().await;
+                                let serialized = serde_json::to_string(&msg).unwrap();
+                                target_writer.write_all(serialized.as_bytes()).await.unwrap();
+                                target_writer.write_all(b"\n").await.unwrap();
+                                target_writer.flush().await.unwrap();
+                            }
+                        }
+                    } else {
+                        // Broadcast message
+                        if msg.username != username {
+                            let serialized = serde_json::to_string(&msg).unwrap();
+                            let mut w = writer.lock().await;
+                            let _ = w.write_all(serialized.as_bytes()).await;
+                            let _ = w.write_all(b"\n").await;
+                            let _ = w.flush().await;
                         }
                     }
-                    Err(_) => break,
                 }
+                Err(_) => break,
             }
-        })
-    };
+        }
+    });
 
     let send_task = tokio::spawn(async move {
         let mut buf = String::new();
@@ -121,8 +94,7 @@ async fn handle_client(
                 Ok(0) => break,
                 Ok(_) => {
                     let msg = Message {
-                        from: user.clone(),
-                        to: None, // Default to broadcast
+                        username: username.clone(),
                         content: buf.trim().to_string(),
                     };
                     if tx.send(msg).is_err() {
@@ -136,7 +108,17 @@ async fn handle_client(
 
     let _ = tokio::try_join!(receive_task, send_task);
 
-    user_manager.remove_user(&username).await;
+    // Remove the user from the shared users list
+    {
+        let mut users_lock = users.lock().await;
+        users_lock.remove(&username);
+    }
+
+    let disconnect_msg = Message {
+        username: "Server".to_string(),
+        content: format!("{} left the chat", username),
+    };
+    tx.send(disconnect_msg).ok();
 
     Ok(())
 }
@@ -146,15 +128,15 @@ async fn server() -> Result<(), Box<dyn Error>> {
     println!("Server listening on port 8080");
 
     let (tx, _) = broadcast::channel(100);
-    let user_manager = Arc::new(UserManager::new());
+    let users = Arc::new(Mutex::new(HashMap::new()));
 
     loop {
         let (socket, _) = listener.accept().await?;
         let tx = tx.clone();
-        let user_manager = Arc::clone(&user_manager);
+        let users = Arc::clone(&users);
 
         tokio::spawn(async move {
-            if let Err(e) = handle_client(socket, user_manager, tx).await {
+            if let Err(e) = handle_client(socket, tx, users).await {
                 eprintln!("Error handling client: {}", e);
             }
         });
@@ -164,7 +146,6 @@ async fn server() -> Result<(), Box<dyn Error>> {
 async fn client(username: String) -> Result<(), Box<dyn Error>> {
     let mut stream = TcpStream::connect("192.168.100.13:8080").await?;
 
-    // Send the username to the server
     stream.write_all(format!("{}\n", username).as_bytes()).await?;
 
     let (reader, mut writer) = stream.into_split();
@@ -172,7 +153,6 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let (msg_tx, mut msg_rx) = mpsc::channel(100);
 
-    // Task to read messages from the server
     let _read_task = tokio::spawn({
         let msg_tx = msg_tx.clone();
         async move {
@@ -180,38 +160,31 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
             loop {
                 buf.clear();
                 match reader.read_line(&mut buf).await {
-                    Ok(0) => break, // Connection closed
+                    Ok(0) => break,
                     Ok(_) => {
                         if let Ok(msg) = serde_json::from_str::<Message>(&buf) {
-                            println!("Received raw message: {}", buf); // Debug log
                             let _ = msg_tx.send(msg).await;
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Error reading from server: {}", e);
-                        break;
-                    }
+                    Err(_) => break,
                 }
             }
         }
     });
 
-    // Task to print messages to stdout
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            println!("{}: {}", msg.from.username, msg.content);
+            println!("{}: {}", msg.username, msg.content);
         }
     });
 
-    // Read input from stdin and send it to the server
     let mut stdin = BufReader::new(tokio::io::stdin());
     loop {
         let mut input = String::new();
         stdin.read_line(&mut input).await?;
 
         let msg = Message {
-            from: User { username: username.clone() },
-            to: None, // Default to broadcast
+            username: username.clone(),
             content: input.trim().to_string(),
         };
 
