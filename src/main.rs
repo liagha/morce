@@ -71,15 +71,11 @@ async fn handle_client(
             loop {
                 match rx.recv().await {
                     Ok(msg) => {
-                        if msg.from.name != user {
-                            let serialized = serde_json::to_string(&msg).unwrap();
-                            let mut w = writer.lock().await;
-                            let _ = w.write_all(serialized.as_bytes()).await;
-                            let _ = w.write_all(b"\n").await;
-                            let _ = w.flush().await;
-                        } else {
-                            xprintln!("Bc ", user ; Debug, " is the sender")
-                        }
+                        let serialized = serde_json::to_string(&msg).unwrap();
+                        let mut w = writer.lock().await;
+                        let _ = w.write_all(serialized.as_bytes()).await;
+                        let _ = w.write_all(b"\n").await;
+                        let _ = w.flush().await;
                     }
                     Err(err) => xeprintln!(err ; Debug),
                 }
