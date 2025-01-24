@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncWriteExt, BufReader, AsyncBufReadExt};
 use tokio::sync::{broadcast, mpsc};
@@ -21,7 +22,8 @@ struct Message {
 
 async fn handle_client(
     socket: TcpStream,
-    tx: broadcast::Sender<Message>
+    tx: broadcast::Sender<Message>,
+    users: Arc<tokio::sync::Mutex<HashMap<String, Uuid>>>,
 ) -> Result<(), Box<dyn Error>> {
     let (reader, writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
@@ -34,6 +36,9 @@ async fn handle_client(
         id: Uuid::new_v4(),
         username: username.clone(),
     };
+
+    // Add the user to the users map
+    users.lock().await.insert(username.clone(), user.id);
 
     let connect_msg = Message {
         from: User {
@@ -51,6 +56,7 @@ async fn handle_client(
     let receive_task = {
         let writer = Arc::clone(&writer);
         let user_id = user.id;
+        let tx = tx.clone(); // Clone the `tx` sender for this task
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
@@ -63,6 +69,10 @@ async fn handle_client(
                             let _ = w.flush().await;
                         }
                     }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        // Resubscribe to the channel if lagged
+                        rx = tx.subscribe();
+                    }
                     Err(_) => break,
                     _ => {}
                 }
@@ -70,60 +80,67 @@ async fn handle_client(
         })
     };
 
-    let send_task = tokio::spawn(async move {
-        let mut buf = String::new();
-        loop {
-            buf.clear();
-            match reader.read_line(&mut buf).await {
-                Ok(0) => break,
-                Ok(_) => {
-                    let content = buf.trim().to_string();
-                    let to = if content.starts_with("@") {
-                        let parts: Vec<&str> = content.splitn(2, ' ').collect();
-                        let username = parts[0].trim_start_matches('@');
-                        Some(User {
-                            id: Uuid::nil(), // This should be replaced with the actual user ID lookup
-                            username: username.to_string(),
-                        })
-                    } else {
-                        None
-                    };
-
-                    let msg = Message {
-                        from: user.clone(),
-                        to: to.clone(),
-                        content: if to.is_some() {
-                            content.splitn(2, ' ').nth(1).unwrap_or("").to_string()
+    let send_task = {
+        let users = Arc::clone(&users);
+        tokio::spawn(async move {
+            let mut buf = String::new();
+            loop {
+                buf.clear();
+                match reader.read_line(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let content = buf.trim().to_string();
+                        let to = if content.starts_with("@") {
+                            let parts: Vec<&str> = content.splitn(2, ' ').collect();
+                            let username = parts[0].trim_start_matches('@');
+                            users.lock().await.get(username).map(|&id| User {
+                                id,
+                                username: username.to_string(),
+                            })
                         } else {
-                            content
-                        },
-                    };
-                    if tx.send(msg).is_err() {
-                        break;
+                            None
+                        };
+
+                        let msg = Message {
+                            from: user.clone(),
+                            to: to.clone(),
+                            content: if to.is_some() {
+                                content.splitn(2, ' ').nth(1).unwrap_or("").to_string()
+                            } else {
+                                content
+                            },
+                        };
+                        if tx.send(msg).is_err() {
+                            break;
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
-        }
-    });
+        })
+    };
 
     let _ = tokio::try_join!(receive_task, send_task);
 
+    // Remove the user from the users map when they disconnect
+    users.lock().await.remove(&username);
+
     Ok(())
 }
-
 async fn server() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("192.168.100.13:8080").await?;
     println!("Server listening on port 8080");
 
-    let (tx, _) = broadcast::channel(100);
+    let (tx, _) = broadcast::channel(1000);
+    let users = Arc::new(tokio::sync::Mutex::new(HashMap::<String, Uuid>::new()));
 
     loop {
         let (socket, _) = listener.accept().await?;
         let tx = tx.clone();
+        let users = Arc::clone(&users);
 
         tokio::spawn(async move {
-            if let Err(e) = handle_client(socket, tx).await {
+            if let Err(e) = handle_client(socket, tx, users).await {
                 eprintln!("Error handling client: {}", e);
             }
         });
