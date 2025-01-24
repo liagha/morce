@@ -71,27 +71,14 @@ async fn handle_client(
             loop {
                 match rx.recv().await {
                     Ok(msg) => {
-                        xprintln!(user, "|||||" => Color::Blue, msg ; Debug);
-                        if let Some(to) = msg.to.clone() {
-                            if to.name == user {
-                                let serialized = serde_json::to_string(&msg).unwrap();
-                                let mut w = writer.lock().await;
-                                let _ = w.write_all(serialized.as_bytes()).await;
-                                let _ = w.write_all(b"\n").await;
-                                let _ = w.flush().await;
-                            } else {
-                                xprintln!("Wont print bc destination isn't equal your name")
-                            }
+                        if msg.from.name != user {
+                            let serialized = serde_json::to_string(&msg).unwrap();
+                            let mut w = writer.lock().await;
+                            let _ = w.write_all(serialized.as_bytes()).await;
+                            let _ = w.write_all(b"\n").await;
+                            let _ = w.flush().await;
                         } else {
-                            if msg.from.name != user {
-                                let serialized = serde_json::to_string(&msg).unwrap();
-                                let mut w = writer.lock().await;
-                                let _ = w.write_all(serialized.as_bytes()).await;
-                                let _ = w.write_all(b"\n").await;
-                                let _ = w.flush().await;
-                            } else {
-                                xprintln!("Bc ", user ; Debug, " is the sender")
-                            }
+                            xprintln!("Bc ", user ; Debug, " is the sender")
                         }
                     }
                     Err(err) => xeprintln!(err ; Debug),
