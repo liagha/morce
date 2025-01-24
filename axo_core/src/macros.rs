@@ -48,27 +48,27 @@ macro_rules! xformat_args {
     };
 
     ($text:expr => $color:expr ; Debug, $($rest:tt)*) => {
-        format!("{}{}", $crate::xformat_args!(@colorize format!("{:?}", $text), $color), crate::xformat_args!($($rest)*))
+        format!("{}{}", $crate::xformat_args!(@colorize format!("{:?}", $text), $color), $crate::xformat_args!($($rest)*))
     };
 
     ($text:expr => $color:expr ; $format:expr, $($rest:tt)*) => {
-        format!("{}{}", $crate::xformat_args!(@colorize $text, $color), crate::xformat_args!($($rest)*))
+        format!("{}{}", $crate::xformat_args!(@colorize $text, $color), $crate::xformat_args!($($rest)*))
     };
 
     ($text:expr ; Debug, $($rest:tt)*) => {
-        format!("{}{}", format!("{:?}", $text), crate::xformat_args!($($rest)*))
+        format!("{}{}", format!("{:?}", $text), $crate::xformat_args!($($rest)*))
     };
 
     ($text:expr ; $format:expr, $($rest:tt)*) => {
-        format!("{}{}", format!("{}", $text), crate::xformat_args!($($rest)*))
+        format!("{}{}", format!("{}", $text), $crate::xformat_args!($($rest)*))
     };
 
     ($text:expr => $color:expr, $($rest:tt)*) => {
-        format!("{}{}", $crate::xformat_args!(@colorize $text, $color), crate::xformat_args!($($rest)*))
+        format!("{}{}", $crate::xformat_args!(@colorize $text, $color), $crate::xformat_args!($($rest)*))
     };
 
     ($text:expr, $($rest:tt)*) => {
-        format!("{}{}", format!("{}", $text), crate::xformat_args!($($rest)*))
+        format!("{}{}", format!("{}", $text), $crate::xformat_args!($($rest)*))
     };
 
     (@colorize $text:expr, $color:expr) => {{
@@ -88,24 +88,24 @@ macro_rules! xformat_args {
 #[macro_export]
 macro_rules! xprint {
     ($($args:tt)*) => {{
-        let text = crate::xformat_args!($($args)*);
+        let text = $crate::xformat_args!($($args)*);
 
         print!("{}", text);
 
         #[cfg(target_arch = "wasm32")]
-        crate::macros::log(text);
+        $crate::macros::log(text);
     }};
 }
 
 #[macro_export]
 macro_rules! xprintln {
     ($($args:tt)*) => {{
-        let text = crate::xformat_args!($($args)*);
+        let text = $crate::xformat_args!($($args)*);
 
         println!("{}", text);
 
         #[cfg(target_arch = "wasm32")]
-        crate::macros::log(&text);
+        $crate::macros::log(&text);
     }};
 }
 
@@ -119,7 +119,7 @@ macro_rules! xeprint {
         eprint!("{}{}", "error: ".colorize(axo_core::colors::Color::BrightRed), text);
 
         #[cfg(target_arch = "wasm32")]
-        crate::macros::error(&text);
+        $crate::macros::error(&text);
     }};
 }
 
@@ -150,9 +150,3 @@ macro_rules! xdprintln {
         $crate::macros::log(&text);
     }};
 }
-
-/*#[proc_macro_attribute]
-pub fn my_attribute(attr: TokenStream, item: TokenStream) -> TokenStream {
-    println!("attr: {}", attr);
-    println!("item: {}", item);
-}*/

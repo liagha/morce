@@ -5,7 +5,7 @@ use serde::{Serialize, Deserialize};
 use std::error::Error;
 use std::fmt::Formatter;
 use std::sync::Arc;
-use axo_core::xeprintln;
+use axo_core::{xeprintln, xprintln, Color};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialOrd, PartialEq)]
 struct User {
@@ -71,13 +71,23 @@ async fn handle_client(
             loop {
                 match rx.recv().await {
                     Ok(msg) => {
-                        // Check if the message is for this client or a broadcast
-                        if msg.to.is_none() || msg.to.as_ref().map(|u| u.name == user).unwrap_or(false) {
-                            let serialized = serde_json::to_string(&msg).unwrap();
-                            let mut w = writer.lock().await;
-                            let _ = w.write_all(serialized.as_bytes()).await;
-                            let _ = w.write_all(b"\n").await;
-                            let _ = w.flush().await;
+                        xprintln!(user, "|||||" => Color::Blue, msg ; Debug);
+                        if let Some(to) = msg.to.clone() {
+                            if to.name == user {
+                                let serialized = serde_json::to_string(&msg).unwrap();
+                                let mut w = writer.lock().await;
+                                let _ = w.write_all(serialized.as_bytes()).await;
+                                let _ = w.write_all(b"\n").await;
+                                let _ = w.flush().await;
+                            }
+                        } else {
+                            if msg.from.name != user {
+                                let serialized = serde_json::to_string(&msg).unwrap();
+                                let mut w = writer.lock().await;
+                                let _ = w.write_all(serialized.as_bytes()).await;
+                                let _ = w.write_all(b"\n").await;
+                                let _ = w.flush().await;
+                            }
                         }
                     }
                     Err(err) => xeprintln!(err ; Debug),
