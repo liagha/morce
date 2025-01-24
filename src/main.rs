@@ -5,6 +5,7 @@ use serde::{Serialize, Deserialize};
 use std::error::Error;
 use std::fmt::Formatter;
 use std::sync::Arc;
+use axo_core::xeprintln;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialOrd, PartialEq)]
 struct User {
@@ -67,15 +68,26 @@ async fn handle_client(
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Ok(msg) if msg.from.name != user => {
-                        let serialized = serde_json::to_string(&msg).unwrap();
-                        let mut w = writer.lock().await;
-                        let _ = w.write_all(serialized.as_bytes()).await;
-                        let _ = w.write_all(b"\n").await;
-                        let _ = w.flush().await;
+                    Ok(msg) => {
+                        if let Some(to) = msg.to.clone() {
+                            if to.name == user {
+                                let serialized = serde_json::to_string(&msg).unwrap();
+                                let mut w = writer.lock().await;
+                                let _ = w.write_all(serialized.as_bytes()).await;
+                                let _ = w.write_all(b"\n").await;
+                                let _ = w.flush().await;
+                            }
+                        } else {
+                            if msg.from.name != user {
+                                let serialized = serde_json::to_string(&msg).unwrap();
+                                let mut w = writer.lock().await;
+                                let _ = w.write_all(serialized.as_bytes()).await;
+                                let _ = w.write_all(b"\n").await;
+                                let _ = w.flush().await;
+                            }
+                        }
                     }
-                    Err(_) => break,
-                    _ => {}
+                    Err(err) => xeprintln!(err ; Debug),
                 }
             }
         })
