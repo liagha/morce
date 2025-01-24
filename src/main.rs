@@ -78,7 +78,7 @@ async fn handle_client(
 }
 
 async fn server() -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    let listener = TcpListener::bind("192.168.100.13:8080").await?;
     println!("Server listening on port 8080");
 
     let (tx, _) = broadcast::channel(100);
@@ -96,7 +96,7 @@ async fn server() -> Result<(), Box<dyn Error>> {
 }
 
 async fn client(username: String) -> Result<(), Box<dyn Error>> {
-    let mut stream = TcpStream::connect("127.0.0.1:8080").await?;
+    let mut stream = TcpStream::connect("192.168.100.13:8080").await?;
 
     // Send username
     stream.write_all(format!("{}\n", username).as_bytes()).await?;
