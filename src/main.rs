@@ -50,6 +50,8 @@ async fn handle_client(
     reader.read_line(&mut username).await?;
     let username = username.trim().to_string();
 
+    println!("{} connected.", username);
+
     let connect_msg = Message {
         from: User::from_str("Server"),
         to: None,
@@ -105,6 +107,7 @@ async fn handle_client(
                         to: None,
                         content: buf.trim().to_string(),
                     };
+                    println!("{} said {}", username.clone(), msg.content);
                     if tx.send(msg).is_err() {
                         break;
                     }
