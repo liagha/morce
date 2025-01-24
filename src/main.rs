@@ -77,7 +77,10 @@ async fn handle_client(
                         let _ = w.write_all(b"\n").await;
                         let _ = w.flush().await;
                     }
-                    Err(err) => xeprintln!(err ; Debug),
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        xprintln!("Lagged");
+                    }
+                    Err(_) => break,
                 }
             }
         })
@@ -159,7 +162,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            println!("{}: {}", msg.from.name, msg.content);
+            println!("Received message: {}: {}", msg.from.name, msg.content);
         }
     });
 
