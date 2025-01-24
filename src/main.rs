@@ -164,6 +164,7 @@ async fn server() -> Result<(), Box<dyn Error>> {
 async fn client(username: String) -> Result<(), Box<dyn Error>> {
     let mut stream = TcpStream::connect("192.168.100.13:8080").await?;
 
+    // Send the username to the server
     stream.write_all(format!("{}\n", username).as_bytes()).await?;
 
     let (reader, mut writer) = stream.into_split();
@@ -171,6 +172,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let (msg_tx, mut msg_rx) = mpsc::channel(100);
 
+    // Task to read messages from the server
     let _read_task = tokio::spawn({
         let msg_tx = msg_tx.clone();
         async move {
@@ -178,24 +180,30 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
             loop {
                 buf.clear();
                 match reader.read_line(&mut buf).await {
-                    Ok(0) => break,
+                    Ok(0) => break, // Connection closed
                     Ok(_) => {
                         if let Ok(msg) = serde_json::from_str::<Message>(&buf) {
+                            println!("Received raw message: {}", buf); // Debug log
                             let _ = msg_tx.send(msg).await;
                         }
                     }
-                    Err(_) => break,
+                    Err(e) => {
+                        eprintln!("Error reading from server: {}", e);
+                        break;
+                    }
                 }
             }
         }
     });
 
+    // Task to print messages to stdout
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
             println!("{}: {}", msg.from.username, msg.content);
         }
     });
 
+    // Read input from stdin and send it to the server
     let mut stdin = BufReader::new(tokio::io::stdin());
     loop {
         let mut input = String::new();
