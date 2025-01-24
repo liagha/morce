@@ -51,7 +51,7 @@ async fn handle_client(
     let username = username.trim().to_string();
 
     let connect_msg = Message {
-        from: User::from_string(username.clone()),
+        from: User::from_str("Server"),
         to: None,
         content: format!("{} joined the chat", username),
     };
