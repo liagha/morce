@@ -43,10 +43,19 @@ enum MessageType {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Message {
-    from: User,
-    to: Option<User>,
+    from: String,
+    to: Option<String>,
     content: String,
     msg_type: MessageType,
+}
+
+impl core::fmt::Display for Message {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let deserialized: Message = serde_json::from_str(&self.content.to_string()).unwrap();
+        let content = deserialized.content;
+
+        write!(f, "{}", content)
+    }
 }
 
 async fn handle_client(
@@ -69,7 +78,7 @@ async fn handle_client(
     xprintln!("Client ", username, " attempting to connect");
 
     let connect_msg = Message {
-        from: User::from_str("Server"),
+        from: "Server".to_string(),
         to: None,
         content: format!("{} joined the chat", username),
         msg_type: MessageType::Connect,
@@ -85,8 +94,8 @@ async fn handle_client(
     {
         let mut w = writer.lock().await;
         let confirm_msg = Message {
-            from: User::from_str("Server"),
-            to: Some(User::from_string(username.clone())),
+            from: "Server".to_string(),
+            to: Some(username.clone()),
             content: "Connected successfully".to_string(),
             msg_type: MessageType::ServerMessage,
         };
@@ -104,7 +113,7 @@ async fn handle_client(
             loop {
                 match rx.recv().await {
                     Ok(msg) => {
-                        if msg.from.name != _username || matches!(msg.msg_type, MessageType::ServerMessage) {
+                        if msg.from != _username || matches!(msg.msg_type, MessageType::ServerMessage) {
                             let serialized = match serde_json::to_string(&msg) {
                                 Ok(s) => s,
                                 Err(e) => {
@@ -147,16 +156,13 @@ async fn handle_client(
                     Ok(0) => break,
                     Ok(_) => {
                         let msg = Message {
-                            from: User::from_string(username.clone()),
+                            from: username.clone(),
                             to: None,
                             content: buf.trim().to_string(),
                             msg_type: MessageType::Chat,
                         };
 
-                        let deserialized: Message = serde_json::from_str(&msg.content.to_string()).unwrap();
-                        let content = deserialized.content;
-
-                        xprintln!(username, " sent: ", content);
+                        xprintln!(username, " sent: ", msg);
 
                         if tx_clone.send(msg).is_err() {
                             xeprintln!("Failed to send message to broadcast channel.");
@@ -171,7 +177,7 @@ async fn handle_client(
             }
 
             let disconnect_msg = Message {
-                from: User::from_str("Server"),
+                from: "Server".to_string(),
                 to: None,
                 content: format!("{} left the chat", username),
                 msg_type: MessageType::Disconnect,
@@ -268,7 +274,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
         while let Some(msg) = msg_rx.recv().await {
             match msg.msg_type {
                 MessageType::Chat => {
-                    println!("{}: {}", msg.from.name, msg.content);
+                    println!("{}: {}", msg.from, msg.content);
                 }
                 MessageType::Connect | MessageType::Disconnect => {
                     println!("*** {}", msg.content);
@@ -286,7 +292,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
         stdin.read_line(&mut input).await?;
 
         let msg = Message {
-            from: User::from_string(username.clone()),
+            from: username.clone(),
             to: None,
             content: input.trim().to_string(),
             msg_type: MessageType::Chat,
