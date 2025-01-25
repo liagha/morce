@@ -141,7 +141,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let (msg_tx, mut msg_rx) = mpsc::channel(100);
 
-    let _read_task = tokio::spawn({
+    let read_task = tokio::spawn({
         let msg_tx = msg_tx.clone();
         async move {
             let mut buf = String::new();
@@ -150,19 +150,28 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
                 match reader.read_line(&mut buf).await {
                     Ok(0) => break,
                     Ok(_) => {
-                        if let Ok(msg) = serde_json::from_str::<Message>(&buf) {
-                            let _ = msg_tx.send(msg).await;
+                        match serde_json::from_str::<Message>(&buf) {
+                            Ok(msg) => {
+                                // Use try_send to avoid blocking if channel is full
+                                if let Err(e) = msg_tx.try_send(msg) {
+                                    eprintln!("Failed to send message: {}", e);
+                                }
+                            }
+                            Err(e) => eprintln!("Failed to parse message: {}", e),
                         }
                     }
-                    Err(_) => break,
+                    Err(e) => {
+                        eprintln!("Read error: {}", e);
+                        break;
+                    }
                 }
             }
         }
     });
 
-    let _print_task = tokio::spawn(async move {
+    let print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            println!("Received message: {}: {}", msg.from.name, msg.content);
+            println!("{}: {}", msg.from.name, msg.content);
         }
     });
 
@@ -180,9 +189,9 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
         let serialized = serde_json::to_string(&msg)?;
         writer.write_all(serialized.as_bytes()).await?;
         writer.write_all(b"\n").await?;
+        writer.flush().await?;
     }
 }
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let mode = std::env::args().nth(1).unwrap_or_else(|| "server".to_string());
