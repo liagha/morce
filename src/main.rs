@@ -49,26 +49,31 @@ struct Message {
     msg_type: MessageType,
 }
 
+impl core::fmt::Display for Message {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#?}", self.content)
+    }
+}
+
 async fn handle_client(
     socket: TcpStream,
     tx: broadcast::Sender<Message>
 ) -> Result<(), Box<dyn Error>> {
-    let (reader, mut writer) = socket.into_split();
+    let (reader, writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
 
-    // Read username
     let mut username = String::new();
+
     reader.read_line(&mut username).await?;
     let username = username.trim().to_string();
 
     if username.is_empty() {
-        xeprintln!("Empty username received");
+        xeprintln!("Empty username received.");
         return Err("Empty username".into());
     }
 
-    xprintln!("Client {} attempting to connect", username);
+    xprintln!("Client ", username, " attempting to connect");
 
-    // Send connection message
     let connect_msg = Message {
         from: User::from_str("Server"),
         to: None,
@@ -76,15 +81,13 @@ async fn handle_client(
         msg_type: MessageType::Connect,
     };
 
-    // Attempt to send connection message, handle potential errors
     if let Err(e) = tx.send(connect_msg) {
-        xeprintln!("Failed to broadcast connection message: {}", e);
+        xeprintln!("Failed to broadcast connection message: ", e);
     }
 
     let mut rx = tx.subscribe();
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
 
-    // Send connection confirmation to the client
     {
         let mut w = writer.lock().await;
         let confirm_msg = Message {
@@ -107,33 +110,32 @@ async fn handle_client(
             loop {
                 match rx.recv().await {
                     Ok(msg) => {
-                        // Skip messages from self unless it's a server message
                         if msg.from.name != _username || matches!(msg.msg_type, MessageType::ServerMessage) {
                             let serialized = match serde_json::to_string(&msg) {
                                 Ok(s) => s,
                                 Err(e) => {
-                                    xeprintln!("Serialization error: {}", e);
+                                    xeprintln!("Serialization error: ", e);
                                     continue;
                                 }
                             };
 
                             let mut w = writer.lock().await;
                             if let Err(e) = w.write_all(serialized.as_bytes()).await {
-                                xeprintln!("Write error: {}", e);
+                                xeprintln!("Write error: ", e);
                                 break;
                             }
                             if let Err(e) = w.write_all(b"\n").await {
-                                xeprintln!("Newline write error: {}", e);
+                                xeprintln!("Newline write error: ", e);
                                 break;
                             }
                             if let Err(e) = w.flush().await {
-                                xeprintln!("Flush error: {}", e);
+                                xeprintln!("Flush error: ", e);
                                 break;
                             }
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        xprintln!("Message channel lagged, skipped {} messages", skipped);
+                        xprintln!("Message channel lagged, skipped ", skipped, " messages");
                     }
                     Err(_) => break,
                 }
@@ -150,7 +152,6 @@ async fn handle_client(
                 match reader.read_line(&mut buf).await {
                     Ok(0) => break,
                     Ok(_) => {
-                        // Parse incoming client message
                         let msg = Message {
                             from: User::from_string(username.clone()),
                             to: None,
@@ -158,21 +159,21 @@ async fn handle_client(
                             msg_type: MessageType::Chat,
                         };
 
-                        xprintln!("{} sent: {}", username, msg.content);
+                        let content = msg.content.trim();
+                        xprintln!(username, " sent: ", content);
 
                         if tx_clone.send(msg).is_err() {
-                            xeprintln!("Failed to send message to broadcast channel");
+                            xeprintln!("Failed to send message to broadcast channel.");
                             break;
                         }
                     }
                     Err(e) => {
-                        xeprintln!("Read error: {}", e);
+                        xeprintln!("Read error: ", e);
                         break;
                     }
                 }
             }
 
-            // Send disconnect message
             let disconnect_msg = Message {
                 from: User::from_str("Server"),
                 to: None,
@@ -197,23 +198,23 @@ async fn server() -> Result<(), Box<dyn Error>> {
 
     loop {
         let (socket, addr) = listener.accept().await?;
-        xprintln!("New connection from: {}", addr);
+        xprintln!("New connection from: ", addr);
 
         let tx = tx.clone();
 
         tokio::spawn(async move {
             if let Err(e) = handle_client(socket, tx).await {
-                xeprintln!("Error handling client: {}", e);
+                xeprintln!("Error handling client: ", e);
             }
         });
     }
 }
 
 async fn client(username: String) -> Result<(), Box<dyn Error>> {
-    xprintln!("Attempting to connect as {}", username);
+    xprintln!("Attempting to connect as ", username);
 
-    // Add connection retry mechanism
     let mut retry_count = 0;
+
     let max_retries = 3;
     let mut stream = loop {
         match TcpStream::connect("192.168.100.13:8080").await {
@@ -223,7 +224,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
                 if retry_count > max_retries {
                     return Err(format!("Failed to connect after {} attempts: {}", max_retries, e).into());
                 }
-                xeprintln!("Connection attempt {} failed: {}", retry_count, e);
+                xeprintln!("Connection attempt ", retry_count, " failed: ", e);
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }
@@ -247,17 +248,15 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
                     Ok(_) => {
                         match serde_json::from_str::<Message>(&buf) {
                             Ok(msg) => {
-                                // Print connection confirmation
                                 if msg.msg_type == MessageType::ServerMessage {
-                                    xprintln!("Server: {}", msg.content);
+                                    xprintln!("Server: ", msg.content);
                                 }
 
-                                // Use try_send to avoid blocking if channel is full
                                 if let Err(e) = msg_tx.try_send(msg) {
-                                    xeprintln!("Failed to send message: {}", e);
+                                    xeprintln!("Failed to send message: ", e);
                                 }
                             }
-                            Err(e) => xeprintln!("Failed to parse message: {}", e),
+                            Err(e) => xeprintln!("Failed to parse message: ", e),
                         }
                     }
                     Err(e) => {
