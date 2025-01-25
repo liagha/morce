@@ -51,10 +51,12 @@ struct Message {
 
 impl core::fmt::Display for Message {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let deserialized: Message = serde_json::from_str(&self.content.to_string()).unwrap();
+        /*let deserialized: Message = serde_json::from_str(&self.content.to_string()).unwrap();
         let content = deserialized.content;
 
-        write!(f, "{}", content)
+        write!(f, "{}", content)*/
+
+        write!(f, "{}", self.content)
     }
 }
 
