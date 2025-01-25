@@ -49,12 +49,6 @@ struct Message {
     msg_type: MessageType,
 }
 
-impl core::fmt::Display for Message {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#?}", self.content)
-    }
-}
-
 async fn handle_client(
     socket: TcpStream,
     tx: broadcast::Sender<Message>
@@ -159,7 +153,9 @@ async fn handle_client(
                             msg_type: MessageType::Chat,
                         };
 
-                        let content = msg.content.trim();
+                        let deserialized: Message = serde_json::from_str(&msg.content.to_string()).unwrap();
+                        let content = deserialized.content;
+
                         xprintln!(username, " sent: ", content);
 
                         if tx_clone.send(msg).is_err() {
