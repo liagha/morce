@@ -165,7 +165,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
 
-    let (msg_tx, mut msg_rx) = mpsc::channel(100);
+    let (msg_tx, mut msg_rx) = mpsc::channel::<Message>(100);
 
     let _read_task = tokio::spawn(async move {
         let mut buf = String::new();
