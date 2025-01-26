@@ -1,35 +1,81 @@
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncWriteExt, BufReader, AsyncBufReadExt};
 use tokio::sync::{broadcast, mpsc};
+use serde::{Serialize, Deserialize};
 use std::error::Error;
+use std::fmt::Formatter;
 use std::sync::Arc;
-use axo_core::{xeprintln, xprintln};
+use axo_core::{xeprintln, xprintln, Color};
 
-#[derive(Debug, Clone)]
+/*#[derive(Debug, Serialize, Deserialize, Clone, PartialOrd, PartialEq)]
+struct User {
+    name: String,
+}
+
+impl User {
+    pub fn from_str(name: &str) -> Self {
+        Self {
+            name: name.to_string()
+        }
+    }
+
+    pub fn from_string(name: String) -> Self {
+        Self {
+            name
+        }
+    }
+}
+
+impl core::fmt::Display for User {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+impl From<&str> for User {
+    fn from(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+        }
+    }
+}
+
+impl From<String> for User {
+    fn from(name: String) -> Self {
+        Self {
+            name,
+        }
+    }
+}*/
+
+type User = String;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Message {
-    username: String,
+    from: User,
+    to: Option<User>,
     content: String,
 }
 
-impl Message {
-    fn serialize(&self) -> String {
-        format!("{}|{}", self.username, self.content)
-    }
+impl core::fmt::Display for Message {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let deserialized: Message =
+            if let Ok(msg) = serde_json::from_str(&self.content.to_string()) {
+                msg
+            } else {
+                self.clone()
+            };
 
-    fn deserialize(input: &str) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
-        let parts: Vec<&str> = input.split('|').collect();
-        if parts.len() != 2 {
-            return Err("Invalid message format".into());
-        }
+        let content = deserialized.content;
 
-        let username = parts[0].to_string();
-        let content = parts[1].to_string();
-
-        Ok(Message { username, content })
+        write!(f, "{}", content)
     }
 }
 
-async fn handle_client(socket: TcpStream, tx: broadcast::Sender<Message>) -> Result<(), Box<dyn Error>> {
+async fn handle_client(
+    socket: TcpStream,
+    tx: broadcast::Sender<Message>
+) -> Result<(), Box<dyn Error>> {
     let (reader, writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
 
@@ -37,10 +83,14 @@ async fn handle_client(socket: TcpStream, tx: broadcast::Sender<Message>) -> Res
     reader.read_line(&mut username).await?;
     let username = username.trim().to_string();
 
+    xprintln!(username, " connected.");
+
     let connect_msg = Message {
-        username: "Server".to_string(),
+        from: User::from("Server"),
+        to: None,
         content: format!("{} joined the chat", username),
     };
+
     tx.send(connect_msg).ok();
 
     let mut rx = tx.subscribe();
@@ -48,19 +98,24 @@ async fn handle_client(socket: TcpStream, tx: broadcast::Sender<Message>) -> Res
 
     let receive_task = {
         let writer = Arc::clone(&writer);
-        let user = username.clone();
+
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Ok(msg) if msg.username != user => {
-                        let serialized = msg.serialize();
+                    Ok(msg) => {
+                        let serialized = serde_json::to_string(&msg).unwrap();
                         let mut w = writer.lock().await;
                         let _ = w.write_all(serialized.as_bytes()).await;
                         let _ = w.write_all(b"\n").await;
                         let _ = w.flush().await;
                     }
-                    Err(_) => break,
-                    _ => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        xprintln!("Lagged");
+                    }
+                    Err(err) => {
+                        xeprintln!("Test Error 1: ", err ; Debug);
+                        break
+                    }
                 }
             }
         })
@@ -72,16 +127,26 @@ async fn handle_client(socket: TcpStream, tx: broadcast::Sender<Message>) -> Res
             buf.clear();
             match reader.read_line(&mut buf).await {
                 Ok(0) => break,
-                Ok(_) => {
+                Ok(ok) => {
+                    xprintln!("Test 3: ", ok);
+
                     let msg = Message {
-                        username: username.clone(),
+                        from: User::from(username.clone()),
+                        to: None,
                         content: buf.trim().to_string(),
                     };
-                    if tx.send(msg).is_err() {
+
+                    xprintln!(username.clone(), " said ", msg);
+
+                    if let Err(err) = tx.send(msg) {
+                        xeprintln!("Test Error 4: ", err ; Debug);
                         break;
                     }
                 }
-                Err(_) => break,
+                Err(err) => {
+                    xeprintln!("Test Error 2: ", err ; Debug);
+                    break
+                },
             }
         }
     });
@@ -92,10 +157,10 @@ async fn handle_client(socket: TcpStream, tx: broadcast::Sender<Message>) -> Res
 }
 
 async fn server() -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind("192.168.100.13:8080").await?;
-    xprintln!("Server listening on port 8080.");
+    let listener = TcpListener::bind("192.168.147.213:8080").await?;
+    xprintln!("Server listening on port 8080");
 
-    let (tx, _) = broadcast::channel(100);
+    let (tx, _) = broadcast::channel(1000);
 
     loop {
         let (socket, _) = listener.accept().await?;
@@ -103,36 +168,44 @@ async fn server() -> Result<(), Box<dyn Error>> {
 
         tokio::spawn(async move {
             if let Err(e) = handle_client(socket, tx).await {
-                xeprintln!("Error handling client: {}", e);
+                xeprintln!("Error handling client: ", e);
             }
         });
     }
 }
 
 async fn client(username: String) -> Result<(), Box<dyn Error>> {
-    let mut stream = TcpStream::connect("192.168.100.13:8080").await?;
+    let mut stream = TcpStream::connect("192.168.147.213:8080").await?;
 
     stream.write_all(format!("{}\n", username).as_bytes()).await?;
 
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
 
-    let (msg_tx, mut msg_rx) = mpsc::channel(100);
+    let (msg_tx, mut msg_rx) = mpsc::channel::<Message>(1000);
 
-    let _read_task = tokio::spawn({
-        let msg_tx = msg_tx.clone();
-        async move {
-            let mut buf = String::new();
-            loop {
-                buf.clear();
-                match reader.read_line(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(_) => {
-                        if let Ok(msg) = Message::deserialize(&buf) {
-                            let _ = msg_tx.send(msg).await;
+    let _read_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            match reader.read_line(&mut buf).await {
+                Ok(0) => {
+                    xeprintln!("Connection closed by server.");
+                    break;
+                }
+                Ok(_) => {
+                    match serde_json::from_str::<Message>(&buf) {
+                        Ok(msg) => {
+                            xprintln!("Received message: ", msg.from, " : ", msg);
+                        }
+                        Err(e) => {
+                            xeprintln!("Failed to deserialize message: ", e);
                         }
                     }
-                    Err(_) => break,
+                }
+                Err(e) => {
+                    xeprintln!("Error reading from socket: ", e);
+                    break;
                 }
             }
         }
@@ -140,22 +213,22 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            xprintln!(msg.username, " : ", msg ; Debug);
+            xprintln!("Received message: ", msg.from, " : ", msg);
         }
     });
 
     let mut stdin = BufReader::new(tokio::io::stdin());
-
     loop {
         let mut input = String::new();
         stdin.read_line(&mut input).await?;
 
         let msg = Message {
-            username: username.clone(),
+            from: User::from(username.clone()),
+            to: None,
             content: input.trim().to_string(),
         };
 
-        let serialized = msg.serialize();
+        let serialized = serde_json::to_string(&msg)?;
         writer.write_all(serialized.as_bytes()).await?;
         writer.write_all(b"\n").await?;
     }
