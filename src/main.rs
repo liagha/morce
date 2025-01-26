@@ -65,7 +65,7 @@ async fn handle_client(
     reader.read_line(&mut username).await?;
     let username = username.trim().to_string();
 
-    println!("{} connected.", username);
+    xprintln!(username, " connected.");
 
     let connect_msg = Message {
         from: User::from_str("Server"),
@@ -95,7 +95,10 @@ async fn handle_client(
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         xprintln!("Lagged");
                     }
-                    Err(_) => break,
+                    Err(err) => {
+                        xeprintln!("Test Error 1: ", err ; Debug);
+                        break
+                    }
                 }
             }
         })
@@ -107,18 +110,26 @@ async fn handle_client(
             buf.clear();
             match reader.read_line(&mut buf).await {
                 Ok(0) => break,
-                Ok(_) => {
+                Ok(ok) => {
+                    xprintln!("Test 3: ", ok);
+
                     let msg = Message {
                         from: User::from_string(username.clone()),
                         to: None,
                         content: buf.trim().to_string(),
                     };
-                    println!("{} said {}", username.clone(), msg);
-                    if tx.send(msg).is_err() {
+
+                    xprintln!(username.clone(), " said ", msg);
+
+                    if let Err(err) = tx.send(msg) {
+                        xeprintln!("Test Error 4: ", err ; Debug);
                         break;
                     }
                 }
-                Err(_) => break,
+                Err(err) => {
+                    xeprintln!("Test Error 2: ", err ; Debug);
+                    break
+                },
             }
         }
     });
@@ -130,7 +141,7 @@ async fn handle_client(
 
 async fn server() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("192.168.100.13:8080").await?;
-    println!("Server listening on port 8080");
+    xprintln!("Server listening on port 8080");
 
     let (tx, _) = broadcast::channel(1000);
 
@@ -140,7 +151,7 @@ async fn server() -> Result<(), Box<dyn Error>> {
 
         tokio::spawn(async move {
             if let Err(e) = handle_client(socket, tx).await {
-                eprintln!("Error handling client: {}", e);
+                xeprintln!("Error handling client: ", e);
             }
         });
     }
@@ -156,20 +167,28 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let (msg_tx, mut msg_rx) = mpsc::channel(100);
 
-    let _read_task = tokio::spawn({
-        let msg_tx = msg_tx.clone();
-        async move {
-            let mut buf = String::new();
-            loop {
-                buf.clear();
-                match reader.read_line(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(_) => {
-                        if let Ok(msg) = serde_json::from_str::<Message>(&buf) {
-                            let _ = msg_tx.send(msg).await;
+    let _read_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            match reader.read_line(&mut buf).await {
+                Ok(0) => {
+                    xeprintln!("Connection closed by server.");
+                    break;
+                }
+                Ok(_) => {
+                    match serde_json::from_str::<Message>(&buf) {
+                        Ok(msg) => {
+                            xprintln!("Received message: ", msg.from, " : ", msg.content);
+                        }
+                        Err(e) => {
+                            xeprintln!("Failed to deserialize message: ", e);
                         }
                     }
-                    Err(_) => break,
+                }
+                Err(e) => {
+                    xeprintln!("Error reading from socket: ", e);
+                    break;
                 }
             }
         }
@@ -177,7 +196,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            println!("Received message: {}: {}", msg.from.name, msg.content);
+            xprintln!("Received message: ", msg.from.name, " : ", msg.content);
         }
     });
 
@@ -209,7 +228,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .unwrap_or_else(|| "Anonymous".to_string());
             client(username).await?
         }
-        _ => println!("Usage: cargo run -- [server/client] [username]"),
+        _ => xprintln!("Usage: cargo run -- [server/client] [username]"),
     }
 
     Ok(())
