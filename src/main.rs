@@ -132,7 +132,7 @@ async fn server() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("192.168.100.13:8080").await?;
     println!("Server listening on port 8080");
 
-    let (tx, _) = broadcast::channel(100);
+    let (tx, _) = broadcast::channel(1000);
 
     loop {
         let (socket, _) = listener.accept().await?;
