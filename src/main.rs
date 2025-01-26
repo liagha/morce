@@ -80,7 +80,6 @@ async fn handle_client(
 
     let receive_task = {
         let writer = Arc::clone(&writer);
-        let user = username.clone();
 
         tokio::spawn(async move {
             loop {
@@ -165,7 +164,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
 
-    let (msg_tx, mut msg_rx) = mpsc::channel::<Message>(100);
+    let (msg_tx, mut msg_rx) = mpsc::channel::<Message>(1000);
 
     let _read_task = tokio::spawn(async move {
         let mut buf = String::new();
@@ -179,7 +178,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
                 Ok(_) => {
                     match serde_json::from_str::<Message>(&buf) {
                         Ok(msg) => {
-                            xprintln!("Received message: ", msg.from, " : ", msg.content);
+                            xprintln!("Received message: ", msg.from, " : ", msg);
                         }
                         Err(e) => {
                             xeprintln!("Failed to deserialize message: ", e);
@@ -196,7 +195,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            xprintln!("Received message: ", msg.from.name, " : ", msg.content);
+            xprintln!("Received message: ", msg.from.name, " : ", msg);
         }
     });
 
