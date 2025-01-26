@@ -3,6 +3,7 @@ use tokio::io::{AsyncWriteExt, BufReader, AsyncBufReadExt};
 use tokio::sync::{broadcast, mpsc};
 use serde::{Serialize, Deserialize};
 use std::error::Error;
+use std::fmt::Formatter;
 use std::sync::Arc;
 use axo_core::{xeprintln, xprintln};
 
@@ -10,6 +11,19 @@ use axo_core::{xeprintln, xprintln};
 struct Message {
     username: String,
     content: String,
+}
+
+impl core::fmt::Display for Message {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let msg =
+            if let Ok(msg) = serde_json::from_str::<Message>(&*self.content.to_string()) {
+                msg
+            } else {
+                self.clone()
+            };
+
+        write!(f, "{}", msg.content)
+    }
 }
 
 async fn handle_client(socket: TcpStream, tx: broadcast::Sender<Message>) -> Result<(), Box<dyn Error>> {
@@ -123,7 +137,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            xprintln!(msg.username, " : ", msg.content);
+            xprintln!(msg.username, " : ", msg);
         }
     });
 
