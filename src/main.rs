@@ -11,6 +11,7 @@ use tokio::time::sleep;
 
 static IP: &str = "192.168.100.13";
 static PORT: &str = "8080";
+static ADDR: &str = "192.168.100.13:8080";
 
 type Sender = mpsc::UnboundedSender<String>;
 type Receiver = mpsc::UnboundedReceiver<String>;
@@ -64,9 +65,8 @@ async fn handle_client(mut stream: TcpStream, clients: Arc<Mutex<HashMap<String,
 }
 
 async fn run_server() -> io::Result<()> {
-    let ip = format!("{}:{}", IP, PORT);
-    let listener = TcpListener::bind(ip).await?;
-    println!("Server listening on {ip}");
+    let listener = TcpListener::bind(ADDR).await?;
+    println!("Server listening on {}", ADDR);
 
     let clients = Arc::new(Mutex::new(HashMap::new()));
 
@@ -87,11 +87,10 @@ async fn run_server() -> io::Result<()> {
 }
 
 async fn run_client() -> io::Result<()> {
-    let server_addr = format!("{}:{}", IP, PORT).as_str();
     let retries = 5;
     let delay = 2;
 
-    if let Some(mut stream) = connect_with_retry(server_addr, retries, delay).await {
+    if let Some(mut stream) = connect_with_retry(ADDR, retries, delay).await {
         println!("Connected to server. Enter your username:");
         let mut username = String::new();
         io::stdin().read_line(&mut username)?;
