@@ -16,7 +16,7 @@ impl Message {
         format!("{}|{}", self.username, self.content)
     }
 
-    fn deserialize(input: &str) -> Result<Message, Box<dyn Error>> {
+    fn deserialize(input: &str) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
         let parts: Vec<&str> = input.split('|').collect();
         if parts.len() != 2 {
             return Err("Invalid message format".into());
@@ -140,7 +140,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            xprintln!(msg.username, " : ", msg);
+            xprintln!(msg.username, " : ", msg ; Debug);
         }
     });
 
