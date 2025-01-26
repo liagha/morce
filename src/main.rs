@@ -53,7 +53,7 @@ type User = String;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Message {
     from: User,
-    to: Option<User>,
+//    to: Option<User>,
     content: String,
 }
 
@@ -87,7 +87,7 @@ async fn handle_client(
 
     let connect_msg = Message {
         from: User::from("Server"),
-        to: None,
+//        to: None,
         content: format!("{} joined the chat", username),
     };
 
@@ -121,18 +121,22 @@ async fn handle_client(
         })
     };
 
+
     let send_task = tokio::spawn(async move {
         let mut buf = String::new();
+
         loop {
             buf.clear();
             match reader.read_line(&mut buf).await {
                 Ok(0) => break,
                 Ok(ok) => {
+                    let user = username.clone();
+
                     xprintln!("Test 3: ", ok);
 
                     let msg = Message {
-                        from: User::from(username.clone()),
-                        to: None,
+                        from: User::from(user),
+//                        to: None,
                         content: buf.trim().to_string(),
                     };
 
@@ -224,7 +228,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
         let msg = Message {
             from: User::from(username.clone()),
-            to: None,
+//            to: None,
             content: input.trim().to_string(),
         };
 
