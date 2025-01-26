@@ -5,8 +5,7 @@ use serde::{Serialize, Deserialize};
 use std::error::Error;
 use std::fmt::Formatter;
 use std::sync::Arc;
-use std::time::Duration;
-use axo_core::{xeprintln, xprintln};
+use axo_core::{xeprintln, xprintln, Color};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialOrd, PartialEq)]
 struct User {
@@ -33,30 +32,25 @@ impl core::fmt::Display for User {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-enum MessageType {
-    Connect,
-    Disconnect,
-    Chat,
-    ServerMessage,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Message {
-    from: String,
-    to: Option<String>,
+    from: User,
+    to: Option<User>,
     content: String,
-    msg_type: MessageType,
 }
 
 impl core::fmt::Display for Message {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        /*let deserialized: Message = serde_json::from_str(&self.content.to_string()).unwrap();
+        let deserialized: Message =
+            if let Ok(msg) = serde_json::from_str(&self.content.to_string()) {
+                msg
+            } else {
+                self.clone()
+            };
+
         let content = deserialized.content;
 
-        write!(f, "{}", content)*/
-
-        write!(f, "{}", self.content)
+        write!(f, "{}", content)
     }
 }
 
@@ -68,79 +62,38 @@ async fn handle_client(
     let mut reader = BufReader::new(reader);
 
     let mut username = String::new();
-
     reader.read_line(&mut username).await?;
     let username = username.trim().to_string();
 
-    if username.is_empty() {
-        xeprintln!("Empty username received.");
-        return Err("Empty username".into());
-    }
-
-    xprintln!("Client ", username, " attempting to connect");
+    println!("{} connected.", username);
 
     let connect_msg = Message {
-        from: "Server".to_string(),
+        from: User::from_str("Server"),
         to: None,
         content: format!("{} joined the chat", username),
-        msg_type: MessageType::Connect,
     };
 
-    if let Err(e) = tx.send(connect_msg) {
-        xeprintln!("Failed to broadcast connection message: ", e);
-    }
+    tx.send(connect_msg).ok();
 
     let mut rx = tx.subscribe();
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
 
-    {
-        let mut w = writer.lock().await;
-        let confirm_msg = Message {
-            from: "Server".to_string(),
-            to: Some(username.clone()),
-            content: "Connected successfully".to_string(),
-            msg_type: MessageType::ServerMessage,
-        };
-        let serialized = serde_json::to_string(&confirm_msg)?;
-        w.write_all(serialized.as_bytes()).await?;
-        w.write_all(b"\n").await?;
-        w.flush().await?;
-    }
-
     let receive_task = {
         let writer = Arc::clone(&writer);
-        let _username = username.clone();
+        let user = username.clone();
 
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(msg) => {
-                        if msg.from != _username || matches!(msg.msg_type, MessageType::ServerMessage) {
-                            let serialized = match serde_json::to_string(&msg) {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    xeprintln!("Serialization error: ", e);
-                                    continue;
-                                }
-                            };
-
-                            let mut w = writer.lock().await;
-                            if let Err(e) = w.write_all(serialized.as_bytes()).await {
-                                xeprintln!("Write error: ", e);
-                                break;
-                            }
-                            if let Err(e) = w.write_all(b"\n").await {
-                                xeprintln!("Newline write error: ", e);
-                                break;
-                            }
-                            if let Err(e) = w.flush().await {
-                                xeprintln!("Flush error: ", e);
-                                break;
-                            }
-                        }
+                        let serialized = serde_json::to_string(&msg).unwrap();
+                        let mut w = writer.lock().await;
+                        let _ = w.write_all(serialized.as_bytes()).await;
+                        let _ = w.write_all(b"\n").await;
+                        let _ = w.flush().await;
                     }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        xprintln!("Message channel lagged, skipped ", skipped, " messages");
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        xprintln!("Lagged");
                     }
                     Err(_) => break,
                 }
@@ -148,44 +101,25 @@ async fn handle_client(
         })
     };
 
-    let send_task = tokio::spawn({
-        let tx_clone = tx.clone();
-        async move {
-            let mut buf = String::new();
-            loop {
-                buf.clear();
-                match reader.read_line(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(_) => {
-                        let msg = Message {
-                            from: username.clone(),
-                            to: None,
-                            content: buf.trim().to_string(),
-                            msg_type: MessageType::Chat,
-                        };
-
-                        xprintln!(username, " sent: ", msg);
-
-                        if tx_clone.send(msg).is_err() {
-                            xeprintln!("Failed to send message to broadcast channel.");
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        xeprintln!("Read error: ", e);
+    let send_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            match reader.read_line(&mut buf).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    let msg = Message {
+                        from: User::from_string(username.clone()),
+                        to: None,
+                        content: buf.trim().to_string(),
+                    };
+                    println!("{} said {}", username.clone(), msg);
+                    if tx.send(msg).is_err() {
                         break;
                     }
                 }
+                Err(_) => break,
             }
-
-            let disconnect_msg = Message {
-                from: "Server".to_string(),
-                to: None,
-                content: format!("{} left the chat", username),
-                msg_type: MessageType::Disconnect,
-            };
-
-            let _ = tx_clone.send(disconnect_msg);
         }
     });
 
@@ -196,43 +130,24 @@ async fn handle_client(
 
 async fn server() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("192.168.100.13:8080").await?;
-    xprintln!("Server listening on port 8080");
+    println!("Server listening on port 8080");
 
     let (tx, _) = broadcast::channel(100);
 
     loop {
-        let (socket, addr) = listener.accept().await?;
-        xprintln!("New connection from: ", addr);
-
+        let (socket, _) = listener.accept().await?;
         let tx = tx.clone();
 
         tokio::spawn(async move {
             if let Err(e) = handle_client(socket, tx).await {
-                xeprintln!("Error handling client: ", e);
+                eprintln!("Error handling client: {}", e);
             }
         });
     }
 }
 
 async fn client(username: String) -> Result<(), Box<dyn Error>> {
-    xprintln!("Attempting to connect as ", username);
-
-    let mut retry_count = 0;
-
-    let max_retries = 3;
-    let mut stream = loop {
-        match TcpStream::connect("192.168.100.13:8080").await {
-            Ok(stream) => break stream,
-            Err(e) => {
-                retry_count += 1;
-                if retry_count > max_retries {
-                    return Err(format!("Failed to connect after {} attempts: {}", max_retries, e).into());
-                }
-                xeprintln!("Connection attempt ", retry_count, " failed: ", e);
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
-        }
-    };
+    let mut stream = TcpStream::connect("192.168.100.13:8080").await?;
 
     stream.write_all(format!("{}\n", username).as_bytes()).await?;
 
@@ -250,23 +165,11 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
                 match reader.read_line(&mut buf).await {
                     Ok(0) => break,
                     Ok(_) => {
-                        match serde_json::from_str::<Message>(&buf) {
-                            Ok(msg) => {
-                                if msg.msg_type == MessageType::ServerMessage {
-                                    xprintln!("Server: ", msg.content);
-                                }
-
-                                if let Err(e) = msg_tx.try_send(msg) {
-                                    xeprintln!("Failed to send message: ", e);
-                                }
-                            }
-                            Err(e) => xeprintln!("Failed to parse message: ", e),
+                        if let Ok(msg) = serde_json::from_str::<Message>(&buf) {
+                            let _ = msg_tx.send(msg).await;
                         }
                     }
-                    Err(e) => {
-                        xeprintln!("Read error: {}", e);
-                        break;
-                    }
+                    Err(_) => break,
                 }
             }
         }
@@ -274,17 +177,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            match msg.msg_type {
-                MessageType::Chat => {
-                    println!("{}: {}", msg.from, msg.content);
-                }
-                MessageType::Connect | MessageType::Disconnect => {
-                    println!("*** {}", msg.content);
-                }
-                MessageType::ServerMessage => {
-                    println!("Server: {}", msg.content);
-                }
-            }
+            println!("Received message: {}: {}", msg.from.name, msg.content);
         }
     });
 
@@ -294,16 +187,14 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
         stdin.read_line(&mut input).await?;
 
         let msg = Message {
-            from: username.clone(),
+            from: User::from_string(username.clone()),
             to: None,
             content: input.trim().to_string(),
-            msg_type: MessageType::Chat,
         };
 
         let serialized = serde_json::to_string(&msg)?;
         writer.write_all(serialized.as_bytes()).await?;
         writer.write_all(b"\n").await?;
-        writer.flush().await?;
     }
 }
 
