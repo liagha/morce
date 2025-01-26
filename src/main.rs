@@ -7,14 +7,8 @@ use std::sync::Arc;
 use axo_core::{xeprintln, xprintln, Color};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct User {
-    username: String,
-    // You can add more fields here, like user_id, avatar_url, etc.
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Message {
-    from: User,
+    username: String,
     content: String,
 }
 
@@ -29,14 +23,12 @@ async fn handle_client(
     reader.read_line(&mut username).await?;
     let username = username.trim().to_string();
 
-    let user = User { username };
-
     let connect_msg = Message {
-        from: User { username: "Server".to_string() },
-        content: format!("{} joined the chat", user.username),
+        username: "Server".to_string(),
+        content: format!("{} joined the chat", username),
     };
 
-    xprintln!("[ ", user.username => Color::Green, " ]", " joined the server." => Color::BrightGreen);
+    xprintln!("[ ", username => Color::Green, " ]", " joined the server." => Color::BrightGreen);
 
     if let Err(err) = tx.send(connect_msg) {
         xeprintln!("Error sending message: {}", err);
@@ -80,7 +72,7 @@ async fn handle_client(
                 Ok(0) => break,
                 Ok(_) => {
                     let msg = Message {
-                        from: user.clone(),
+                        username: username.clone(),
                         content: buf.trim().to_string(),
                     };
                     if tx.send(msg).is_err() {
@@ -151,12 +143,12 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            match msg.from.username.as_str() {
+            match msg.username.as_str() {
                 "Server" => {
-                    xprintln!(msg.from.username => Color::BrightGreen, " => ", msg.content => Color::Green);
+                    xprintln!(msg.username => Color::BrightGreen, " => ", msg.content => Color::Green);
                 },
                 _ => {
-                    xprintln!(msg.from.username, " : ", msg.content);
+                    xprintln!(msg.username, " : ", msg.content);
                 }
             };
         }
@@ -169,7 +161,7 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
         stdin.read_line(&mut input).await?;
 
         let msg = Message {
-            from: User { username: username.clone() },
+            username: username.clone(),
             content: input.trim().to_string(),
         };
 
