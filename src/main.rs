@@ -3,73 +3,19 @@ use tokio::io::{AsyncWriteExt, BufReader, AsyncBufReadExt};
 use tokio::sync::{broadcast, mpsc};
 use serde::{Serialize, Deserialize};
 use std::error::Error;
-use std::fmt::Formatter;
 use std::sync::Arc;
 use axo_core::{xeprintln, xprintln, Color};
 
-/*#[derive(Debug, Serialize, Deserialize, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct User {
-    name: String,
+    username: String,
+    // You can add more fields here, like user_id, avatar_url, etc.
 }
-
-impl User {
-    pub fn from_str(name: &str) -> Self {
-        Self {
-            name: name.to_string()
-        }
-    }
-
-    pub fn from_string(name: String) -> Self {
-        Self {
-            name
-        }
-    }
-}
-
-impl core::fmt::Display for User {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name)
-    }
-}
-
-impl From<&str> for User {
-    fn from(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-        }
-    }
-}
-
-impl From<String> for User {
-    fn from(name: String) -> Self {
-        Self {
-            name,
-        }
-    }
-}*/
-
-type User = String;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Message {
     from: User,
-    to: Option<User>,
     content: String,
-}
-
-impl core::fmt::Display for Message {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let deserialized: Message =
-            if let Ok(msg) = serde_json::from_str(&self.content.to_string()) {
-                msg
-            } else {
-                self.clone()
-            };
-
-        let content = deserialized.content;
-
-        write!(f, "{}", content)
-    }
 }
 
 async fn handle_client(
@@ -83,15 +29,18 @@ async fn handle_client(
     reader.read_line(&mut username).await?;
     let username = username.trim().to_string();
 
-    xprintln!(username, " connected.");
+    let user = User { username };
 
     let connect_msg = Message {
-        from: User::from("Server"),
-        to: None,
-        content: format!("{} joined the chat", username),
+        from: User { username: "Server".to_string() },
+        content: format!("{} joined the chat", user.username),
     };
 
-    tx.send(connect_msg).ok();
+    xprintln!("[ ", user.username => Color::Green, " ]", " joined the server." => Color::BrightGreen);
+
+    if let Err(err) = tx.send(connect_msg) {
+        xeprintln!("Error sending message: {}", err);
+    }
 
     let mut rx = tx.subscribe();
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
@@ -105,16 +54,18 @@ async fn handle_client(
                     Ok(msg) => {
                         let serialized = serde_json::to_string(&msg).unwrap();
                         let mut w = writer.lock().await;
-                        let _ = w.write_all(serialized.as_bytes()).await;
-                        let _ = w.write_all(b"\n").await;
-                        let _ = w.flush().await;
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        xprintln!("Lagged");
+                        if let Err(err) = w.write_all(serialized.as_bytes()).await {
+                            xeprintln!("Error writing to client: {}", err);
+                        }
+                        if let Err(err) = w.write_all(b"\n").await {
+                            xeprintln!("Error writing newline to client: {}", err);
+                        }
+                        if let Err(err) = w.flush().await {
+                            xeprintln!("Error flushing to client: {}", err);
+                        }
                     }
                     Err(err) => {
-                        xeprintln!("Test Error 1: ", err ; Debug);
-                        break
+                        xeprintln!("Error receiving message: {}", err);
                     }
                 }
             }
@@ -127,25 +78,19 @@ async fn handle_client(
             buf.clear();
             match reader.read_line(&mut buf).await {
                 Ok(0) => break,
-                Ok(ok) => {
-                    xprintln!("Test 3: ", ok);
-
+                Ok(_) => {
                     let msg = Message {
-                        from: User::from(username.clone()),
-                        to: None,
+                        from: user.clone(),
                         content: buf.trim().to_string(),
                     };
-
-                    xprintln!(username.clone(), " said ", msg);
-
-                    if let Err(err) = tx.send(msg) {
-                        xeprintln!("Test Error 4: ", err ; Debug);
+                    if tx.send(msg).is_err() {
+                        xeprintln!("Error sending message from client.");
                         break;
                     }
                 }
                 Err(err) => {
-                    xeprintln!("Test Error 2: ", err ; Debug);
-                    break
+                    xeprintln!("Error reading from client: {}", err);
+                    break;
                 },
             }
         }
@@ -157,10 +102,10 @@ async fn handle_client(
 }
 
 async fn server() -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind("192.168.147.213:8080").await?;
-    xprintln!("Server listening on port 8080");
+    let listener = TcpListener::bind("192.168.100.13:8080").await?;
+    xprintln!("Server listening on port " => Color::BrightGreen, "8080" => Color::Green);
 
-    let (tx, _) = broadcast::channel(1000);
+    let (tx, _) = broadcast::channel(100);
 
     loop {
         let (socket, _) = listener.accept().await?;
@@ -168,44 +113,37 @@ async fn server() -> Result<(), Box<dyn Error>> {
 
         tokio::spawn(async move {
             if let Err(e) = handle_client(socket, tx).await {
-                xeprintln!("Error handling client: ", e);
+                xeprintln!("Error handling client: {}", e);
             }
         });
     }
 }
 
 async fn client(username: String) -> Result<(), Box<dyn Error>> {
-    let mut stream = TcpStream::connect("192.168.147.213:8080").await?;
-
+    let mut stream = TcpStream::connect("192.168.100.13:8080").await?;
     stream.write_all(format!("{}\n", username).as_bytes()).await?;
 
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
 
-    let (msg_tx, mut msg_rx) = mpsc::channel::<Message>(1000);
+    let (msg_tx, mut msg_rx) = mpsc::channel(100);
 
-    let _read_task = tokio::spawn(async move {
-        let mut buf = String::new();
-        loop {
-            buf.clear();
-            match reader.read_line(&mut buf).await {
-                Ok(0) => {
-                    xeprintln!("Connection closed by server.");
-                    break;
-                }
-                Ok(_) => {
-                    match serde_json::from_str::<Message>(&buf) {
-                        Ok(msg) => {
-                            xprintln!("Received message: ", msg.from, " : ", msg);
-                        }
-                        Err(e) => {
-                            xeprintln!("Failed to deserialize message: ", e);
+    let _read_task = tokio::spawn({
+        let msg_tx = msg_tx.clone();
+        async move {
+            let mut buf = String::new();
+            loop {
+                buf.clear();
+                match reader.read_line(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        if let Ok(msg) = serde_json::from_str::<Message>(&buf) {
+                            if let Err(err) = msg_tx.send(msg).await {
+                                xeprintln!("Error sending message to receiver: {}", err);
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    xeprintln!("Error reading from socket: ", e);
-                    break;
+                    Err(_) => break,
                 }
             }
         }
@@ -213,24 +151,35 @@ async fn client(username: String) -> Result<(), Box<dyn Error>> {
 
     let _print_task = tokio::spawn(async move {
         while let Some(msg) = msg_rx.recv().await {
-            xprintln!("Received message: ", msg.from, " : ", msg);
+            match msg.from.username.as_str() {
+                "Server" => {
+                    xprintln!(msg.from.username => Color::BrightGreen, " => ", msg.content => Color::Green);
+                },
+                _ => {
+                    xprintln!(msg.from.username, " : ", msg.content);
+                }
+            };
         }
     });
 
     let mut stdin = BufReader::new(tokio::io::stdin());
+
     loop {
         let mut input = String::new();
         stdin.read_line(&mut input).await?;
 
         let msg = Message {
-            from: User::from(username.clone()),
-            to: None,
+            from: User { username: username.clone() },
             content: input.trim().to_string(),
         };
 
         let serialized = serde_json::to_string(&msg)?;
-        writer.write_all(serialized.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
+        if let Err(err) = writer.write_all(serialized.as_bytes()).await {
+            xeprintln!("Error writing message: {}", err);
+        }
+        if let Err(err) = writer.write_all(b"\n").await {
+            xeprintln!("Error writing newline to server: {}", err);
+        }
     }
 }
 
@@ -239,11 +188,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mode = std::env::args().nth(1).unwrap_or_else(|| "server".to_string());
 
     match mode.as_str() {
-        "server" => server().await?,
+        "server" => {
+            if let Err(e) = server().await {
+                xeprintln!("Server error: {}", e);
+            }
+        }
         "client" => {
             let username = std::env::args().nth(2)
                 .unwrap_or_else(|| "Anonymous".to_string());
-            client(username).await?
+            if let Err(e) = client(username).await {
+                xeprintln!("Client error: {}", e);
+            }
         }
         _ => xprintln!("Usage: cargo run -- [server/client] [username]"),
     }
