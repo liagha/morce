@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-static IP: &str = "192.168.100.193";
+static IP: &str = "192.168.100.255";
 static PORT: &str = "8080";
-static ADDR: &str = "192.168.100.193:8000";
+static ADDR: &str = "192.168.100.255:8080";
 
 type Sender = mpsc::UnboundedSender<String>;
 type Receiver = mpsc::UnboundedReceiver<String>;
