@@ -68,21 +68,28 @@ async fn run_client() -> io::Result<()> {
 
         let mut buffer = [0; 512];
 
+        // Wrap stream in Arc<Mutex>
+        let stream = Arc::new(Mutex::new(stream));
+
         // Spawn a task to handle receiving messages
-        let receive_task = tokio::spawn(async move {
-            loop {
-                match stream.read(&mut buffer).await {
-                    Ok(n) => {
-                        if n == 0 {
-                            println!("Server disconnected");
+        let receive_task = tokio::spawn({
+            let stream = Arc::clone(&stream);
+            async move {
+                loop {
+                    let mut stream = stream.lock().await;
+                    match stream.read(&mut buffer).await {
+                        Ok(n) => {
+                            if n == 0 {
+                                println!("Server disconnected");
+                                break;
+                            }
+                            let response = String::from_utf8_lossy(&buffer[..n]);
+                            println!("Response: {}", response);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to read from server: {}", e);
                             break;
                         }
-                        let response = String::from_utf8_lossy(&buffer[..n]);
-                        println!("Response: {}", response);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to read from server: {}", e);
-                        break;
                     }
                 }
             }
@@ -95,15 +102,15 @@ async fn run_client() -> io::Result<()> {
             let mut input = String::new();
             io::stdin().read_line(&mut input)?;
 
+            let mut stream = stream.lock().await; // Lock the stream before writing
             if let Err(e) = stream.write(input.as_bytes()).await {
                 eprintln!("Failed to send data: {}", e);
                 break;
             }
         }
 
-        // Wait for the receiving task to finish (if the server disconnects or an error happens)
+        // Wait for the receiving task to finish
         receive_task.await?;
-
     } else {
         eprintln!("Failed to connect to server after {} retries.", retries);
     }
