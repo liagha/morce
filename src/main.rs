@@ -85,10 +85,37 @@ async fn run_server() -> io::Result<()> {
     }
 }
 
+#[tokio::main]
+async fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        eprintln!("Usage: {} [server|client]", args[0]);
+        return;
+    }
+
+    match args[1].as_str() {
+        "server" => {
+            if let Err(e) = run_server().await {
+                eprintln!("Server error: {}", e);
+            }
+        }
+        "client" => {
+            if let Err(e) = run_client().await {
+                eprintln!("Client error: {}", e);
+            }
+        }
+        _ => {
+            eprintln!("Invalid argument. Use 'server' or 'client'.");
+        }
+    }
+}
+
 async fn run_client() -> io::Result<()> {
     let retries = 5;
-    let delay = 2;
+    let delay = 5;
 
+    println!("Connecting to server...");
     if let Some(mut stream) = connect_with_retry(ADDR, retries, delay).await {
         println!("Connected to server. Enter your username:");
         let mut username = String::new();
@@ -126,40 +153,15 @@ async fn run_client() -> io::Result<()> {
             }
         }
     } else {
-        eprintln!("Failed to connect to server after {} retries", retries);
+        eprintln!("Failed to connect to server after {} retries.", retries);
     }
 
     Ok(())
 }
 
-#[tokio::main]
-async fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 2 {
-        eprintln!("Usage: {} [server|client]", args[0]);
-        return;
-    }
-
-    match args[1].as_str() {
-        "server" => {
-            if let Err(e) = run_server().await {
-                eprintln!("Server error: {}", e);
-            }
-        }
-        "client" => {
-            if let Err(e) = run_client().await {
-                eprintln!("Client error: {}", e);
-            }
-        }
-        _ => {
-            eprintln!("Invalid argument. Use 'server' or 'client'.");
-        }
-    }
-}
-
 async fn connect_with_retry(addr: &str, retries: u32, delay: u64) -> Option<TcpStream> {
     for attempt in 0..retries {
+        println!("Attempt {}: Connecting to {}...", attempt + 1, addr);
         match TcpStream::connect(addr).await {
             Ok(stream) => {
                 println!("Connected to server at {}", addr);
