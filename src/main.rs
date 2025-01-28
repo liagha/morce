@@ -9,8 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-static IP: &str = "192.168.100.195";
-static PORT: &str = "8080";
+static SERVER: &str = "0.0.0.0:6000";
 static ADDR: &str = "192.168.100.195:6000";
 
 type Sender = mpsc::UnboundedSender<String>;
@@ -65,8 +64,8 @@ async fn handle_client(mut stream: TcpStream, clients: Arc<Mutex<HashMap<String,
 }
 
 async fn run_server() -> io::Result<()> {
-    let listener = TcpListener::bind(ADDR).await?;
-    println!("Server listening on {}", ADDR);
+    let listener = TcpListener::bind(SERVER).await?;
+    println!("Server listening on {}", SERVER);
 
     let clients = Arc::new(Mutex::new(HashMap::new()));
 
@@ -118,7 +117,7 @@ async fn run_client() -> io::Result<()> {
             match stream.read(&mut buffer).await {
                 Ok(n) => {
                     let response = String::from_utf8_lossy(&buffer[..n]);
-                    println!("{}", response);
+                    println!("Response: {}", response);
                 }
                 Err(e) => {
                     eprintln!("Failed to read from server: {}", e);
