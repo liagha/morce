@@ -122,41 +122,57 @@ async fn run_client() -> io::Result<()> {
     println!("Connecting to server...");
     if let Some(mut stream) = connect_with_retry(ADDR, retries, delay).await {
         println!("Connected to server. Enter your username:");
+
+        // Get the username from user input
         let mut username = String::new();
         io::stdin().read_line(&mut username)?;
         let username = username.trim().to_string();
         println!("Sending username: {}", username);
 
-        // Send username with flush
+        // Send the username to the server
         if let Err(e) = stream.write_all(username.as_bytes()).await {
             eprintln!("Failed to send username: {}", e);
             return Ok(());
         }
         stream.flush().await?;
 
-        println!("Welcome, {}! Type messages to send to other clients.", username);
+        // Use Arc and Mutex to share the stream between tasks
+        let stream = Arc::new(Mutex::new(stream));
 
-        let mut buffer = [0; 512];
+        // Start a task to listen for messages from the server while the user types messages
+        let stream_clone = Arc::clone(&stream);
+        tokio::spawn(async move {
+            let mut buffer = [0; 512];
+            loop {
+                let mut stream = stream_clone.lock().await;
+                match stream.read(&mut buffer).await {
+                    Ok(n) if n > 0 => {
+                        let response = String::from_utf8_lossy(&buffer[..n]);
+                        println!("Received: {}", response);
+                    }
+                    Ok(_) => {
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to read from server: {}", e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Read user input and send it to the server
         loop {
             print!("> ");
             io::stdout().flush()?;
             let mut input = String::new();
             io::stdin().read_line(&mut input)?;
 
+            // Handle input and send message to the server
+            let mut stream = stream.lock().await;
             if let Err(e) = stream.write(input.as_bytes()).await {
                 eprintln!("Failed to send data: {}", e);
                 break;
-            }
-
-            match stream.read(&mut buffer).await {
-                Ok(n) => {
-                    let response = String::from_utf8_lossy(&buffer[..n]);
-                    println!("Response: {}", response);
-                }
-                Err(e) => {
-                    eprintln!("Failed to read from server: {}", e);
-                    break;
-                }
             }
         }
     } else {
