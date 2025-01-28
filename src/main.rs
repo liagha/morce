@@ -73,14 +73,18 @@ async fn run_server() -> io::Result<()> {
         let (mut stream, _) = listener.accept().await?;
         println!("New connection: {}", stream.peer_addr()?);
 
+        let mut buffer = [0; 512];
+        let n = stream.read(&mut buffer).await?;
+        if n == 0 {
+            println!("Client disconnected during handshake.");
+            continue;
+        }
+        let username = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
+        println!("Received username: {}", username);
+
         let clients = Arc::clone(&clients);
         tokio::spawn(async move {
-            let mut buffer = [0; 512];
-            if let Ok(n) = stream.read(&mut buffer).await {
-                let username = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
-                println!("{} connected", username);
-                handle_client(stream, clients, username).await;
-            }
+            handle_client(stream, clients, username).await;
         });
     }
 }
@@ -121,11 +125,14 @@ async fn run_client() -> io::Result<()> {
         let mut username = String::new();
         io::stdin().read_line(&mut username)?;
         let username = username.trim().to_string();
+        println!("Sending username: {}", username);
 
-        if let Err(e) = stream.write(username.as_bytes()).await {
+        // Send username with flush
+        if let Err(e) = stream.write_all(username.as_bytes()).await {
             eprintln!("Failed to send username: {}", e);
             return Ok(());
         }
+        stream.flush().await?;
 
         println!("Welcome, {}! Type messages to send to other clients.", username);
 
