@@ -76,7 +76,7 @@ macro_rules! xformat_args {
         {
             use axo_core::colors::ColoredText;
 
-            $text.colorize($color)
+            format!("{}", $text).colorize($color)
         }
         #[cfg(target_arch = "wasm32")]
         {
