@@ -13,7 +13,7 @@ use crate::client::Client;
 use crate::server::Server;
 
 static SERVER: &str = "0.0.0.0:6000";
-static ADDR: &str = "192.168.100.195:6000";
+static ADDR: &str = "192.168.100.0:6000";
 
 pub enum Error {
     ServerStart(std::io::Error),
