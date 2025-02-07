@@ -89,14 +89,16 @@ async fn main() {
         return;
     }
 
-    let address = if let Some(address) = args.get(3) {
-        address
-    } else {
-        ADDR
-    };
+
 
     match args[1].as_str() {
         "server" => {
+            let address = if let Some(address) = args.get(3) {
+                address
+            } else {
+                SERVER
+            };
+
             if let Ok(server) = Server::start(address).await {
                 if let Err(err) = server.run().await {
                     xeprintln!("Server error: ", err => Color::Crimson);
@@ -106,6 +108,12 @@ async fn main() {
             }
         }
         _ => {
+            let address = if let Some(address) = args.get(3) {
+                address
+            } else {
+                ADDR
+            };
+
             if let Err(e) = Client::run_client(address.to_string()).await {
                 xeprintln!("Client error: ", e => Color::Crimson);
             }
