@@ -13,7 +13,7 @@ use crate::client::Client;
 use crate::server::Server;
 
 static SERVER: &str = "0.0.0.0:6000";
-static ADDR: &str = "192.168.100.0:6000";
+static ADDR: &str = "192.168.100.195:6000";
 
 pub enum Error {
     ServerStart(std::io::Error),
@@ -93,7 +93,8 @@ async fn main() {
 
     match args[1].as_str() {
         "server" => {
-            let address = if let Some(address) = args.get(3) {
+            let address = if let Some(address) = args.get(2) {
+                xprintln!("Got ", address, " as server address");
                 address
             } else {
                 SERVER
@@ -108,7 +109,7 @@ async fn main() {
             }
         }
         _ => {
-            let address = if let Some(address) = args.get(3) {
+            let address = if let Some(address) = args.get(2) {
                 address
             } else {
                 ADDR

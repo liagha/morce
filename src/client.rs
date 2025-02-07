@@ -127,7 +127,7 @@ impl Client {
                 if username.len() > 3 {
                     break username;
                 } else {
-                    xeprintln!("Username must be longer than 3 characters." => Color::Orange);
+                    xeprintln!("Username must be atlist 3 characters long." => Color::Orange);
                 }
             };
 

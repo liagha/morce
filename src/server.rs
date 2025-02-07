@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use axo_core::{xprintln, Color};
+use axo_core::{xeprintln, xprintln, Color};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -17,19 +17,24 @@ pub struct Server {
 
 impl Server {
     pub async fn start(address: &str) -> Result<Self, Error> {
+        xprintln!("Attempting to bind to address: " => Color::Yellow, address => Color::Yellow);
+
+        let listener = match TcpListener::bind(address).await {
+            Ok(listener) => listener,
+            Err(err) => {
+                xeprintln!("Failed to bind to address: ", err => Color::Crimson);
+                return Err(Error::ServerStart(err));
+            }
+        };
+
+        xprintln!("Server listening on " => Color::BrightGreen, address => Color::Green);
+
         Ok(Self {
             address: address.to_string(),
-            listener: {
-                let listener = TcpListener::bind(address).await.map_err(|err| Error::ServerStart(err))?;
-
-                xprintln!("Server listening on " => Color::BrightGreen, address => Color::Green);
-
-                listener
-            },
+            listener,
             clients: Arc::new(Mutex::new(HashMap::new())),
         })
     }
-
     pub async fn run(&self) -> Result<(), Error> {
         loop {
             tokio::select! {
@@ -60,7 +65,7 @@ impl Server {
                     for (_, client) in clients.iter() {
                         let message = Message::from("Server is shutting down...", MessageType::Public);
 
-                        let _ = client.sender.send(message);
+                        client.sender.send(message).map_err(|err| Error::Send(err))?;
                     }
 
                     sleep(Duration::from_secs(1)).await;
