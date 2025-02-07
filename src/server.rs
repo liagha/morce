@@ -74,10 +74,4 @@ impl Server {
 
         Ok(())
     }
-
-    pub async fn run_with_address(address: &str) -> Result<(), Error> {
-        let server = Self::start(address).await?;
-
-        server.run()
-    }
 }

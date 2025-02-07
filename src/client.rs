@@ -6,8 +6,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
-use crate::{Error, Message, MessageType, Sender};
-use crate::server::Server;
+use crate::{Address, Error, Message, MessageType, Sender};
 
 pub struct Client {
     pub username: String,
@@ -100,13 +99,13 @@ pub async fn handle_client(stream: TcpStream, clients: Arc<Mutex<HashMap<String,
 }
 
 impl Client {
-    pub async fn run_client(server: Server) -> Result<(), Error> {
+    pub async fn run_client(server: Address) -> Result<(), Error> {
         let retries = 5;
         let delay = 5;
 
         xprintln!("Connecting to server..." => Color::Yellow);
 
-        if let Some(stream) = Self::connect_with_retry(&server.address, retries, delay).await {
+        if let Some(stream) = Self::connect_with_retry(&server, retries, delay).await {
             let username = loop {
                 xprintln!("Enter your username:" => Color::BrightBlue);
                 xprint!("> " => Color::DarkGray, "> " => Color::SlateGray, "> ");
@@ -191,13 +190,13 @@ impl Client {
         Ok(())
     }
 
-    pub async fn connect_with_retry(addr: &String, retries: u32, delay: u64) -> Option<TcpStream> {
+    pub async fn connect_with_retry(server: &Address, retries: u32, delay: u64) -> Option<TcpStream> {
         for attempt in 0..retries {
-            xprintln!("Attempt " => Color::BrightYellow, attempt + 1 => Color::BrightYellow,": Connecting to " => Color::Yellow, addr => Color::Yellow);
+            xprintln!("Attempt " => Color::BrightYellow, attempt + 1 => Color::BrightYellow,": Connecting to " => Color::Yellow, server => Color::Yellow);
 
-            match TcpStream::connect(addr).await {
+            match TcpStream::connect(server.clone()).await {
                 Ok(stream) => {
-                    xprintln!("Connected to server at " => Color::BrightGreen, addr => Color::Green);
+                    xprintln!("Connected to server successfully " => Color::BrightGreen);
                     return Some(stream);
                 }
                 Err(err) => {

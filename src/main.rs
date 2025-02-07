@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use std::env;
 use std::fmt::Formatter;
 use std::io::Write;
-use axo_core::{xeprintln, Color};
+use axo_core::{xeprintln, xprint, xprintln, Color};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::error::SendError;
 use crate::client::Client;
@@ -76,15 +76,16 @@ impl Message {
     }
 }
 
-type Sender = mpsc::UnboundedSender<Message>;
-type Receiver = mpsc::UnboundedReceiver<Message>;
+pub type Sender = mpsc::UnboundedSender<Message>;
+pub type Receiver = mpsc::UnboundedReceiver<Message>;
+pub type Address = String;
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        xeprintln!("Usage: ", args[0], " [server|client] [ip (optional)]");
+        xeprintln!("Usage: ", args[0], " [server|client]");
         return;
     }
 
@@ -94,17 +95,19 @@ async fn main() {
         ADDR
     };
 
-    if let Ok(server) = Server::start(address).await {
-        match args[1].as_str() {
-            "server" => {
+    match args[1].as_str() {
+        "server" => {
+            if let Ok(server) = Server::start(address).await {
                 if let Err(err) = server.run().await {
                     xeprintln!("Server error: ", err => Color::Crimson);
                 }
+            } else {
+                println!("shit");
             }
-            _ => {
-                if let Err(err) = Client::run_client(server).await {
-                    xeprintln!("Client error: ", err => Color::Crimson);
-                }
+        }
+        _ => {
+            if let Err(e) = Client::run_client(address.to_string()).await {
+                xeprintln!("Client error: ", e => Color::Crimson);
             }
         }
     }
