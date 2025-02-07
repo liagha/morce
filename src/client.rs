@@ -5,6 +5,7 @@ use axo_core::{xeprintln, xprint, xprintln, Color};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc::error::SendError;
 use tokio::time::sleep;
 use crate::{Address, Error, Message, MessageType, Sender};
 
@@ -77,7 +78,10 @@ pub async fn handle_client(stream: TcpStream, clients: Arc<Mutex<HashMap<String,
                         }
                     }
                 }
-                Err(err) => return Ok(()),
+                Err(err) => {
+                    xeprintln!("Error reading buffer: ", err);
+                    return Ok(())
+                },
             }
         }
     });
@@ -91,10 +95,17 @@ pub async fn handle_client(stream: TcpStream, clients: Arc<Mutex<HashMap<String,
     });
 
     tokio::select! {
-        _ = receive_task => {}
-        _ = send_task => {}
+    result = receive_task => {
+        if let Err(err) = result {
+            xeprintln!("Receive task error: ", err => Color::Crimson);
+        }
     }
-
+    result = send_task => {
+        if let Err(err) = result {
+            xeprintln!("Send task error: ", err => Color::Crimson);
+        }
+    }
+    }
     Ok(())
 }
 
@@ -176,15 +187,20 @@ impl Client {
             });
 
             tokio::select! {
-            _ = receive_task => {}
-            result = send_task => {
-                if let Err(e) = result {
-                    xeprintln!("Send task error: ", e => Color::Crimson ; Debug);
-                }
-            }
+    result = receive_task => {
+        if let Err(err) = result {
+            xeprintln!("Receive task error: ", err => Color::Crimson);
         }
+    }
+    result = send_task => {
+        if let Err(err) = result {
+            xeprintln!("Send task error: ", err => Color::Crimson);
+        }
+    }
+}
         } else {
             xeprintln!("Failed to connect to server after", retries => Color::Crimson, "retries.");
+            return Err(Error::Send(SendError(Message::from("connecting", MessageType::Public))));
         }
 
         Ok(())
