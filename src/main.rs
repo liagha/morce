@@ -82,14 +82,13 @@ pub type Address = String;
 
 #[tokio::main]
 async fn main() {
+    xprintln!("Test");
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
         xeprintln!("Usage: ", args[0], " [server|client]");
         return;
     }
-
-
 
     match args[1].as_str() {
         "server" => {

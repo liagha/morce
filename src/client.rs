@@ -219,28 +219,6 @@ impl Client {
                     xprintln!("Connection Error Details:" => Color::BrightRed);
                     xprintln!("  Error Type: " => Color::Red, err.to_string() => Color::Crimson);
 
-                    match err.kind() {
-                        std::io::ErrorKind::ConnectionRefused => {
-                            xprintln!("  Reason: Connection Refused" => Color::Orange,
-                                   " - Ensure server is running and port is correct" => Color::Yellow);
-                        },
-                        std::io::ErrorKind::HostUnreachable => {
-                            xprintln!("  Reason: Host Unreachable" => Color::Orange,
-                                   " - Check network connectivity, firewall, or IP address" => Color::Yellow);
-                        },
-                        std::io::ErrorKind::TimedOut => {
-                            xprintln!("  Reason: Connection Timeout" => Color::Orange,
-                                   " - Network issues or server not responding" => Color::Yellow);
-                        },
-                        std::io::ErrorKind::AddrNotAvailable => {
-                            xprintln!("  Reason: Address Not Available" => Color::Orange,
-                                   " - Invalid IP or network configuration" => Color::Yellow);
-                        },
-                        _ => {
-                            xprintln!("  Reason: Unknown Network Error" => Color::Orange);
-                        }
-                    }
-
                     if attempt < retries - 1 {
                         xprintln!("Retrying in " => Color::Yellow, delay, " seconds..." => Color::Yellow);
                         sleep(Duration::from_secs(delay)).await;
