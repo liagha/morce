@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use std::env;
 use std::fmt::Formatter;
 use std::io::Write;
-use axo_core::{xeprintln, xprint, xprintln, Color};
+use axo_core::{xeprintln, xprintln, Color};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::error::SendError;
 use crate::client::Client;
@@ -109,6 +109,7 @@ async fn main() {
             }
         }
         _ => {
+            xprintln!("Start");
             let address = if let Some(address) = args.get(2) {
                 address
             } else {
