@@ -124,10 +124,10 @@ impl Client {
                 std::io::stdin().read_line(&mut username).map_err(|err| Error::Read(err))?;
                 let username = username.trim().to_string();
 
-                if username.len() > 3 {
+                if username.len() >= 3 {
                     break username;
                 } else {
-                    xeprintln!("Username must be atlist 3 characters long." => Color::Orange);
+                    xeprintln!("Username must be at least 3 characters long." => Color::Orange);
                 }
             };
 

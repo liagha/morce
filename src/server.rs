@@ -44,8 +44,6 @@ impl Server {
                     let mut buffer = [0; 512];
                     let n = stream.read(&mut buffer).await.map_err(|err| Error::Read(err))?;
 
-                    //xprintln!("Read " => Color::Cyan, n, " bytes from stream" => Color::Cyan);
-
                     if n == 0 {
                         continue;
                     }
