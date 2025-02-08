@@ -106,8 +106,6 @@ pub type Address = String;
 
 #[tokio::main]
 async fn main() {
-    prost_build::compile_protos(&["src/message.proto"], &["src/"]).unwrap();
-
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
