@@ -1,60 +1,24 @@
 mod server;
 mod client;
-mod chat;
 mod message;
+mod errors;
 
-use tokio::sync::mpsc;
-use std::env;
-use std::fmt::Formatter;
-use axo_core::{xeprintln, xprintln, Color};
-use tokio::sync::mpsc::error::SendError;
-use crate::client::Client;
-use crate::message::Message;
-use crate::server::Server;
+pub use {
+    errors::Error,
+    client::Client,
+    server::Server,
+    message::{Message},
+    axo_core::{ Color, xprintln, xeprintln },
+};
+use {
+    std::env,
+};
 
 static SERVER: &str = "0.0.0.0:6000";
 static ADDR: &str = "192.168.100.195:6000";
 
-pub enum Error {
-    ServerStart(std::io::Error),
-    Send(SendError<Message>),
-    Read(std::io::Error),
-    JoinError(tokio::task::JoinError),
-    Write,
-    Flush,
-    MessageConversion,
-}
-
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::ServerStart(e) => {
-                write!(f, "Server start error: {}", e)
-            }
-            Error::Send(e) => {
-                write!(f, "Message sending error: {}", e)
-            }
-            Error::Read(e) => {
-                write!(f, "Message receiving error: {}", e)
-            }
-            Error::Write => {
-                write!(f, "Message writing error")
-            }
-            Error::MessageConversion => {
-                write!(f, "Message conversion error")
-            }
-            Error::Flush => {
-                write!(f, "Writer flush error")
-            }
-            Error::JoinError(err) => {
-                write!(f, "Task failed: {}", err)
-            }
-        }
-    }
-}
-
-pub type Sender = mpsc::UnboundedSender<Message>;
-pub type Receiver = mpsc::UnboundedReceiver<Message>;
+pub type Sender = tokio::sync::mpsc::UnboundedSender<Message>;
+pub type Receiver = tokio::sync::mpsc::UnboundedReceiver<Message>;
 pub type Address = String;
 
 #[tokio::main]
@@ -75,12 +39,15 @@ async fn main() {
                 SERVER
             };
 
-            if let Ok(server) = Server::start(address).await {
-                if let Err(err) = server.run().await {
-                    xeprintln!("Server error: ", err => Color::Crimson);
+            match Server::start(address).await {
+                Ok(server) => {
+                    if let Err(e) = server.run().await {
+                        xeprintln!("Server error: ", e => Color::Crimson);
+                    }
                 }
-            } else {
-                println!("shit");
+                Err(e) => {
+                    xeprintln!("Server start error: ", e => Color::Crimson);
+                }
             }
         }
         _ => {

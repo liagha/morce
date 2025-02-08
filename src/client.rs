@@ -1,112 +1,18 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+// client.rs
 use tokio::time::Duration;
 use axo_core::{xeprintln, xprintln, Color};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, Mutex};
 use tokio::time::sleep;
-use crate::{Address, Error, Sender, Message};
+use crate::{Address, Sender, Message};
+use crate::errors::Error;
+use std::path::Path;
+use tokio::fs::File;
 use crate::message::MessageType;
-
 
 pub struct Client {
     pub username: String,
     pub sender: Sender,
-}
-
-pub async fn handle_client(stream: TcpStream, clients: Arc<Mutex<HashMap<String, Client>>>, username: String) -> Result<(), Error> {
-    let (tx, mut rx) = mpsc::unbounded_channel();
-
-    clients.lock().await.insert(username.clone(), Client { username: username.clone(), sender: tx });
-
-    xprintln!("User '" => Color::Magenta, username => Color::Pink, "' joined the chat." => Color::Magenta);
-
-    let (mut reader, mut writer) = stream.into_split();
-
-    let username_for_send = username.clone();
-    let clients_for_send = Arc::clone(&clients);
-
-    let receive_task = tokio::spawn(async move {
-        let mut buffer = [0; 512];
-        loop {
-            match reader.read(&mut buffer).await {
-                Ok(0) => {
-                    xprintln!("User '" => Color::BrightRed, username => Color::Crimson, "' disconnected." => Color::BrightRed);
-
-                    clients.lock().await.remove(&username);
-                    return Ok(());
-                }
-                Ok(n) => {
-                    let message = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
-                    let clients = clients.lock().await;
-
-                    if message.starts_with('@') {
-                        if let Some((target, msg)) = message.split_once(' ') {
-                            let target_username = target.trim_start_matches('@');
-
-                            if let Some(client) = clients.get(target_username) {
-                                xprintln!("Private message from " => Color::BrightBlue, "'", username, "'", " to " => Color::BrightBlue, "'", target_username, "'", " : ", msg => Color::Blue);
-
-                                let message = Message::from(msg, username.clone(), MessageType::Private);
-                                client.sender.send(message).map_err(|err| Error::Send(err))?;
-                            } else {
-                                xprintln!("User '" => Color::Red, username, "' tried to message '" => Color::Red, target_username, "', but they are not online." => Color::Red);
-
-                                if let Some(sender) = clients.get(&username) {
-                                    let message = Message::from("User not found", "Server".to_string(), MessageType::Private);
-                                    sender.sender.send(message).map_err(|err| Error::Send(err))?;
-                                }
-                            }
-                            continue;
-                        } else {
-                            return Err(Error::MessageConversion);
-                        }
-                    }
-
-                    xprintln!(username => Color::BrightBlue, " : " => Color::Blue, message);
-
-                    for (_, client) in clients.iter() {
-                        if client.username != username {
-                            let message = Message::from(message.as_str(), username.clone(), MessageType::Public);
-                            client.sender.send(message).map_err(|err| Error::Send(err))?;
-                        }
-                    }
-                }
-                Err(err) => {
-                    xeprintln!("Error reading buffer: ", err);
-                    clients.lock().await.remove(&username);
-                    return Ok(());
-                }
-            }
-        }
-    });
-
-    let send_task = tokio::spawn(async move {
-        while let Some(message) = rx.recv().await {
-            if let Err(err) = writer.write_all(&message.as_bytes()?).await {
-                xeprintln!("Failed to send message: ", err => Color::Crimson);
-                clients_for_send.lock().await.remove(&username_for_send);
-                return Err(Error::Write);
-            }
-        }
-        Ok(())
-    });
-
-    tokio::select! {
-        result = receive_task => {
-            if let Err(err) = result {
-                xeprintln!("Receive task error: ", err => Color::Crimson);
-            }
-        }
-        result = send_task => {
-            if let Err(err) = result {
-                xeprintln!("Send task error: ", err => Color::Crimson);
-            }
-        }
-    }
-
-    Ok(())
 }
 
 impl Client {
@@ -120,7 +26,7 @@ impl Client {
             let username = loop {
                 xprintln!("Enter your username:" => Color::BrightBlue);
                 let mut username = String::new();
-                std::io::stdin().read_line(&mut username).map_err(|err| Error::Read(err))?;
+                std::io::stdin().read_line(&mut username).map_err(|e| Error::InputReadFailed(e))?;
                 let username = username.trim().to_string();
 
                 if username.len() >= 3 && username.chars().all(|c| c.is_alphanumeric()) {
@@ -139,7 +45,7 @@ impl Client {
                 return Ok(());
             }
 
-            writer.flush().await.map_err(|_err| Error::Flush)?;
+            writer.flush().await.map_err(|e| Error::StreamFlushFailed(e))?;
 
             xprintln!("Welcome, " => Color::BrightGreen, username => Color::Green, "! Type messages to send to other clients." => Color::BrightGreen);
 
@@ -160,54 +66,60 @@ impl Client {
                                 Ok(response) => {
                                     xprintln!(response.sender, " : ", response.content);
                                 }
-                                Err(err) => {
-                                    break Err(err);
+                                Err(e) => {
+                                    break Err(e);
                                 }
                             }
 
-                            tokio::io::stdout().flush().await.map_err(|_err| Error::Flush)?;
+                            tokio::io::stdout().flush().await.map_err(|e| Error::StreamFlushFailed(e))?;
                         }
                         Err(e) => {
-                            break Err(Error::Read(e));
+                            break Err(Error::MessageReceiveFailed(e));
                         }
                     }
                 }
             });
-            let send_task = tokio::spawn(async move {
+
+            let send_task : tokio::task::JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                 loop {
-                    tokio::io::stdout().flush().await?;
+                    tokio::io::stdout().flush().await.map_err(|e| Error::StreamFlushFailed(e))?;
                     let mut input = String::new();
 
-                    if std::io::stdin().read_line(&mut input).is_err() {
-                        break;
+                    std::io::stdin().read_line(&mut input).map_err(|e| Error::InputReadFailed(e))?;
+
+                    let input = input.trim();
+
+                    if input.starts_with("/file ") {
+                        let file_path = input.trim_start_matches("/file ");
+                        if let Ok(file_data) = Self::read_file(file_path).await {
+                            let message = Message::from_file(file_data, username.clone(), MessageType::Public);
+                            writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
+                        } else {
+                            xeprintln!("Failed to read file: ", file_path => Color::Orange);
+                        }
+                    } else {
+                        let message = Message::from(input, username.clone(), MessageType::Public);
+                        writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
                     }
 
-                    if let Err(e) = writer.write_all(input.as_bytes()).await {
-                        xeprintln!("Failed to send data: ", e => Color::Crimson);
-                        break;
-                    }
-
-                    writer.flush().await?;
+                    writer.flush().await.map_err(|e| Error::StreamFlushFailed(e))?;
                 }
-                Ok::<_, tokio::io::Error>(())
             });
 
             tokio::select! {
                 result = receive_task => {
-                    if let Err(err) = result {
-                        xeprintln!("Receive task error: ", err => Color::Crimson);
-                        return Err(Error::JoinError(err));
+                    if let Err(e) = result {
+                        xeprintln!("Receive task error: ", e => Color::Crimson);
+                        return Err(Error::TaskJoinFailed(e));
                     }
                 }
                 result = send_task => {
-                    if let Err(err) = result {
-                        xeprintln!("Send task error: ", err => Color::Crimson);
-                        return Err(Error::JoinError(err));
+                    if let Err(e) = result {
+                        xeprintln!("Send task error: ", e => Color::Crimson);
+                        return Err(Error::TaskJoinFailed(e));
                     }
                 }
             }
-        } else {
-            xeprintln!("Failed to connect to server after", retries => Color::Crimson, "retries.");
         }
 
         Ok(())
@@ -222,8 +134,8 @@ impl Client {
                     xprintln!("Connected to server successfully " => Color::BrightGreen);
                     return Some(stream);
                 }
-                Err(err) => {
-                    xprintln!("Error Type: " => Color::Red, err.to_string() => Color::Crimson);
+                Err(e) => {
+                    xeprintln!(e => Color::Crimson);
 
                     if attempt < retries - 1 {
                         xprintln!("Retrying in " => Color::Yellow, delay, " seconds..." => Color::Yellow);
@@ -235,6 +147,14 @@ impl Client {
 
         xeprintln!("Failed to connect after " => Color::Crimson, retries, " attempts." => Color::Crimson);
         None
+    }
+
+    async fn read_file(file_path: &str) -> Result<Vec<u8>, Error> {
+        let path = Path::new(file_path);
+        let mut file = File::open(path).await.map_err(|e| Error::InputReadFailed(e))?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).await.map_err(|e| Error::InputReadFailed(e))?;
+        Ok(buffer)
     }
 }
 

@@ -1,69 +1,100 @@
-use std::fmt::Formatter;
-use crate::chat::{ChatMessage, MessageContent};
+// message.rs
 use crate::Error;
-
-#[derive(Clone, PartialEq)]
-pub enum Content {
-    Text(String),
-    File(Vec<u8>),
-}
-
-impl Default for Content {
-    fn default() -> Self {
-        Self::Text("_".to_string())
-    }
-}
-
-impl Default for MessageContent {
-    fn default() -> Self {
-        Self::Text("_".to_string())
-    }
-}
-
-#[derive(Copy, Clone)]
-pub enum MessageType {
-    Private = 0,
-    Public = 1
-}
 
 pub struct Message {
     pub sender: String,
     pub content: Content,
-    pub kind: MessageType
+    pub kind: MessageType,
 }
 
-impl From<MessageContent> for Content {
-    fn from(msg_content: MessageContent) -> Self {
-        match msg_content {
-            MessageContent::Text(text) => Content::Text(text),
-            MessageContent::File(bytes) => Content::File(bytes),
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ChatMessage {
+    #[prost(string, tag = "1")]
+    pub sender: String,
+
+    #[prost(oneof = "Content", tags = "2, 3")]
+    pub content: Option<Content>,
+
+    #[prost(enumeration = "MessageType", tag = "4")]
+    pub kind: i32,
+}
+
+#[derive(Clone, PartialEq, prost::Oneof)]
+pub enum Content {
+    #[prost(string, tag = "2")]
+    Text(String),
+
+    #[prost(bytes, tag = "3")]
+    File(Vec<u8>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
+#[repr(i32)]
+pub enum MessageType {
+    Private = 0,
+    Public = 1,
+}
+
+impl Message {
+    pub fn from(msg: &str, from: String, kind: MessageType) -> Self {
+        Self {
+            sender: from,
+            content: Content::from(msg),
+            kind,
         }
+    }
+
+    pub fn from_file(file_data: Vec<u8>, from: String, kind: MessageType) -> Self {
+        Self {
+            sender: from,
+            content: Content::File(file_data),
+            kind,
+        }
+    }
+
+    pub fn as_bytes(&self) -> Result<Vec<u8>, Error> {
+        use prost::Message;
+
+        let sender = self.sender.trim().to_string();
+
+        let chat_message = ChatMessage {
+            sender,
+            content: Some(self.content.clone()),
+            kind: self.kind as i32,
+        };
+        let mut buf = Vec::new();
+        chat_message.encode(&mut buf).map_err(|_| Error::MessageConversionFailed)?;
+        Ok(buf)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        use prost::Message;
+
+        let chat_message = ChatMessage::decode(bytes).map_err(|_| Error::MessageConversionFailed)?;
+
+        Ok(Self {
+            sender: chat_message.sender,
+            content: chat_message.content.unwrap_or_default(),
+            kind: match chat_message.kind {
+                0 => MessageType::Private,
+                1 => MessageType::Public,
+                _ => return Err(Error::MessageConversionFailed),
+            },
+        })
     }
 }
 
-impl From<Content> for MessageContent {
-    fn from(content: Content) -> Self {
-        match content {
-            Content::Text(text) => MessageContent::Text(text),
-            Content::File(bytes) => MessageContent::File(bytes),
-        }
+impl Default for Content {
+    fn default() -> Self {
+        Self::Text("".to_string())
     }
 }
 
 impl std::fmt::Display for Content {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Content::Text(text) => write!(f, "{}", text),
             Content::File(_) => write!(f, "[File content]"),
-        }
-    }
-}
-
-impl std::fmt::Debug for Content {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Content::Text(text) => write!(f, "Text({})", text),
-            Content::File(bytes) => write!(f, "File({} bytes)", bytes.len()),
         }
     }
 }
@@ -80,43 +111,18 @@ impl From<&str> for Content {
     }
 }
 
-impl Message {
-    pub fn from(msg: &str, from: String, kind: MessageType) -> Self {
-        Self {
-            sender: from,
-            content: Content::from(msg),
-            kind,
+impl MessageType {
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Private => "PRIVATE",
+            Self::Public => "PUBLIC",
         }
     }
-
-    pub fn as_bytes(&self) -> Result<Vec<u8>, Error> {
-        use prost::Message;
-
-        let sender = self.sender.trim().to_string();
-
-        let chat_message = ChatMessage {
-            sender,
-            content: Some(MessageContent::from(self.content.clone())),
-            kind: self.kind as i32,
-        };
-        let mut buf = Vec::new();
-        chat_message.encode(&mut buf).map_err(|_| Error::MessageConversion)?;
-        Ok(buf)
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        use prost::Message;
-
-        let chat_message = ChatMessage::decode(bytes).map_err(|_| Error::MessageConversion)?;
-
-        Ok(Self {
-            sender: chat_message.sender,
-            content: Content::from(chat_message.content.clone().unwrap_or_default()),
-            kind: match chat_message.kind {
-                0 => MessageType::Private,
-                1 => MessageType::Public,
-                _ => return Err(Error::MessageConversion),
-            },
-        })
+    pub fn from_str_name(value: &str) -> Option<Self> {
+        match value {
+            "PRIVATE" => Some(Self::Private),
+            "PUBLIC" => Some(Self::Public),
+            _ => None,
+        }
     }
 }
