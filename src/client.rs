@@ -119,7 +119,6 @@ impl Client {
         if let Some(stream) = Self::connect_with_retry(&server, retries, delay).await {
             let username = loop {
                 xprintln!("Enter your username:" => Color::BrightBlue);
-                xprint!("> " => Color::DarkGray, "> " => Color::SlateGray, "> ");
                 let mut username = String::new();
                 std::io::stdin().read_line(&mut username).map_err(|err| Error::Read(err))?;
                 let username = username.trim().to_string();
@@ -154,8 +153,7 @@ impl Client {
                         }
                         Ok(n) => {
                             let response = String::from_utf8_lossy(&buffer[..n]);
-                            xprintln!("\n", response);
-                            xprint!("> " => Color::DarkGray, "> " => Color::SlateGray, "> ");
+                            xprintln!(response);
                             let _ = tokio::io::stdout().flush();
                         }
                         Err(e) => {
@@ -168,7 +166,6 @@ impl Client {
 
             let send_task = tokio::spawn(async move {
                 loop {
-                    xprint!("> " => Color::DarkGray, "> " => Color::SlateGray, "> ");
                     tokio::io::stdout().flush().await?;
                     let mut input = String::new();
 
