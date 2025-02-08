@@ -1,5 +1,6 @@
 mod server;
 mod client;
+mod chat;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -14,11 +15,7 @@ use crate::server::Server;
 static SERVER: &str = "0.0.0.0:6000";
 static ADDR: &str = "192.168.100.195:6000";
 
-mod message {
-    include!(concat!(env!("OUT_DIR"), "/chat.rs"));
-}
-
-use message::{ChatMessage, MessageType as OtherMessageType};
+use chat::{ChatMessage};
 
 pub enum Error {
     ServerStart(std::io::Error),
@@ -76,6 +73,8 @@ impl Message {
     pub fn as_bytes(&self) -> Result<Vec<u8>, Error> {
         use prost::Message;
 
+        xprintln!("Test2: ", self.content);
+
         let chat_message = ChatMessage {
             content: self.content.clone(),
             kind: self.kind as i32,
@@ -89,6 +88,7 @@ impl Message {
         use prost::Message;
 
         let chat_message = ChatMessage::decode(bytes).map_err(|_| Error::MessageConversion)?;
+        xprintln!("Test1: ", chat_message.content);
         Ok(Self {
             content: chat_message.content,
             kind: match chat_message.kind {
