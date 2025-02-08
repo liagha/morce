@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package chat;
+
+message ChatMessage {
+    string content = 1;
+    MessageType kind = 2;
+}
+
+enum MessageType {
+    PRIVATE = 0;
+    PUBLIC = 1;
+}
