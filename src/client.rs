@@ -8,7 +8,7 @@ use crate::{Address, Sender, Message};
 use crate::errors::Error;
 use std::path::Path;
 use tokio::fs::File;
-use crate::message::MessageType;
+use crate::message::{Content, MessageType};
 
 pub struct Client {
     pub username: String,
@@ -64,7 +64,22 @@ impl Client {
 
                             match Message::from_bytes(bytes) {
                                 Ok(response) => {
-                                    xprintln!(response.sender, " : ", response.content);
+                                    match response.content {
+                                        Content::Text(text) => {
+                                            xprintln!(response.sender, " : ", text);
+                                        }
+                                        Content::File(file_data) => {
+                                            xprintln!(response.sender, " sent a file. Saving..." => Color::BrightBlue);
+
+                                            // Save the file to the filesystem
+                                            let file_name = format!("received_file_{}.bin", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+                                            if let Err(e) = Self::save_file(&file_name, &file_data).await {
+                                                xeprintln!("Failed to save file: ", e => Color::Crimson);
+                                            } else {
+                                                xprintln!("File saved as: ", file_name => Color::BrightGreen);
+                                            }
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     break Err(e);
@@ -155,6 +170,13 @@ impl Client {
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer).await.map_err(|e| Error::InputReadFailed(e))?;
         Ok(buffer)
+    }
+
+    async fn save_file(file_name: &str, file_data: &[u8]) -> Result<(), Error> {
+        let path = Path::new(file_name);
+        let mut file = File::create(path).await.map_err(|e| Error::InputReadFailed(e))?;
+        file.write_all(file_data).await.map_err(|e| Error::BytesWriteFailed(e))?;
+        Ok(())
     }
 }
 
