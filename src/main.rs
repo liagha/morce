@@ -7,13 +7,18 @@ use std::env;
 use std::fmt::Formatter;
 use std::io::Write;
 use axo_core::{xeprintln, xprintln, Color};
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::error::SendError;
 use crate::client::Client;
 use crate::server::Server;
 
 static SERVER: &str = "0.0.0.0:6000";
 static ADDR: &str = "192.168.100.195:6000";
+
+mod message {
+    include!(concat!(env!("OUT_DIR"), "/chat.rs"));
+}
+
+use message::{ChatMessage, MessageType as OtherMessageType};
 
 pub enum Error {
     ServerStart(std::io::Error),
@@ -49,13 +54,12 @@ impl core::fmt::Display for Error {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Copy, Clone)]
 pub enum MessageType {
     Private = 0,
     Public = 1
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct Message {
     content: String,
     kind: MessageType
@@ -68,11 +72,31 @@ impl Message {
             kind,
         }
     }
+
     pub fn as_bytes(&self) -> Result<Vec<u8>, Error> {
-        match serde_json::to_string(&self) {
-            Ok(json) => Ok(json.into_bytes()),
-            Err(_) => Err(Error::MessageConversion)
-        }
+        use prost::Message;
+
+        let chat_message = ChatMessage {
+            content: self.content.clone(),
+            kind: self.kind as i32,
+        };
+        let mut buf = Vec::new();
+        chat_message.encode(&mut buf).map_err(|_| Error::MessageConversion)?;
+        Ok(buf)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
+        use prost::Message;
+
+        let chat_message = ChatMessage::decode(bytes).map_err(|_| Error::MessageConversion)?;
+        Ok(Self {
+            content: chat_message.content,
+            kind: match chat_message.kind {
+                0 => MessageType::Private,
+                1 => MessageType::Public,
+                _ => return Err(Error::MessageConversion),
+            },
+        })
     }
 }
 
@@ -82,7 +106,8 @@ pub type Address = String;
 
 #[tokio::main]
 async fn main() {
-    xprintln!("Test");
+    prost_build::compile_protos(&["src/message.proto"], &["src/"]).unwrap();
+
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
@@ -108,7 +133,6 @@ async fn main() {
             }
         }
         _ => {
-            xprintln!("Start");
             let address = if let Some(address) = args.get(2) {
                 address
             } else {

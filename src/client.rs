@@ -216,8 +216,7 @@ impl Client {
                     return Some(stream);
                 }
                 Err(err) => {
-                    xprintln!("Connection Error Details:" => Color::BrightRed);
-                    xprintln!("  Error Type: " => Color::Red, err.to_string() => Color::Crimson);
+                    xprintln!("Error Type: " => Color::Red, err.to_string() => Color::Crimson);
 
                     if attempt < retries - 1 {
                         xprintln!("Retrying in " => Color::Yellow, delay, " seconds..." => Color::Yellow);
