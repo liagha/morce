@@ -1,12 +1,9 @@
 mod server;
 mod client;
 mod chat;
-
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use std::env;
 use std::fmt::Formatter;
-use std::io::Write;
 use axo_core::{xeprintln, xprintln, Color};
 use tokio::sync::mpsc::error::SendError;
 use crate::client::Client;
@@ -21,6 +18,7 @@ pub enum Error {
     ServerStart(std::io::Error),
     Send(SendError<Message>),
     Read(std::io::Error),
+    JoinError(tokio::task::JoinError),
     Write,
     Flush,
     MessageConversion,
@@ -47,6 +45,9 @@ impl core::fmt::Display for Error {
             Error::Flush => {
                 write!(f, "Writer flush error")
             }
+            Error::JoinError(err) => {
+                write!(f, "Task failed: {}", err)
+            }
         }
     }
 }
@@ -58,13 +59,15 @@ pub enum MessageType {
 }
 
 pub struct Message {
+    sender: String,
     content: String,
     kind: MessageType
 }
 
 impl Message {
-    pub fn from(msg: &str, kind: MessageType) -> Self {
+    pub fn from(msg: &str, from: String, kind: MessageType) -> Self {
         Self {
+            sender: from,
             content: msg.to_string(),
             kind,
         }
@@ -73,10 +76,12 @@ impl Message {
     pub fn as_bytes(&self) -> Result<Vec<u8>, Error> {
         use prost::Message;
 
-        xprintln!("Test2: ", self.content);
+        let sender = self.sender.trim().to_string();
+        let content = self.content.trim().to_string();
 
         let chat_message = ChatMessage {
-            content: self.content.clone(),
+            sender,
+            content,
             kind: self.kind as i32,
         };
         let mut buf = Vec::new();
@@ -88,9 +93,11 @@ impl Message {
         use prost::Message;
 
         let chat_message = ChatMessage::decode(bytes).map_err(|_| Error::MessageConversion)?;
-        xprintln!("Test1: ", chat_message.content);
+        let content = chat_message.content.trim().to_string();
+
         Ok(Self {
-            content: chat_message.content,
+            sender: chat_message.sender,
+            content,
             kind: match chat_message.kind {
                 0 => MessageType::Private,
                 1 => MessageType::Public,

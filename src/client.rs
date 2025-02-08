@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::Duration;
-use axo_core::{xeprintln, xprint, xprintln, Color};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use axo_core::{xeprintln, xprintln, Color};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
-use tokio::sync::mpsc::error::SendError;
 use tokio::time::sleep;
 use crate::{Address, Error, Message, MessageType, Sender};
 
@@ -26,6 +25,9 @@ pub async fn handle_client(stream: TcpStream, clients: Arc<Mutex<HashMap<String,
     let username_clone = username.clone();
     let clients_clone = Arc::clone(&clients);
 
+    let username_clone2 = username_clone.clone();
+    let clients_clone2 = Arc::clone(&clients_clone);
+
     let receive_task = tokio::spawn(async move {
         let mut buffer = [0; 512];
         loop {
@@ -34,6 +36,7 @@ pub async fn handle_client(stream: TcpStream, clients: Arc<Mutex<HashMap<String,
                     xprintln!("User '" => Color::BrightRed, username_clone => Color::Crimson, "' disconnected." => Color::BrightRed);
 
                     clients_clone.lock().await.remove(&username_clone);
+
                     drop(clients_clone);
 
                     return Ok(());
@@ -50,14 +53,16 @@ pub async fn handle_client(stream: TcpStream, clients: Arc<Mutex<HashMap<String,
                             if let Some(client) = clients.get(target_username) {
                                 xprintln!("Private message from " => Color::BrightBlue, "'", username_clone, "'", " to " => Color::BrightBlue, "'", target_username, "'", " : ", msg => Color::Blue);
 
-                                let message = Message::from(format!("{} : {}", username_clone, msg).as_str(), MessageType::Private);
+                                let username = username_clone.clone();
+
+                                let message = Message::from(msg, username, MessageType::Private);
 
                                 client.sender.send(message).map_err(|err| Error::Send(err))?;
                             } else {
                                 xprintln!("User '" => Color::Red, username_clone, "' tried to message '" => Color::Red, target_username, "', but they are not online." => Color::Red);
 
                                 if let Some(sender) = clients.get(&username_clone) {
-                                    let message = Message::from("User not found", MessageType::Private);
+                                    let message = Message::from("User not found", "Server".to_string(), MessageType::Private);
 
                                     sender.sender.send(message).map_err(|err| Error::Send(err))?;
                                 }
@@ -72,7 +77,7 @@ pub async fn handle_client(stream: TcpStream, clients: Arc<Mutex<HashMap<String,
 
                     for (_, client) in clients.iter() {
                         if client.username != username_clone {
-                            let message = Message::from(format!("{} : {}", username_clone, message).as_str(), MessageType::Public);
+                            let message = Message::from(message.as_str(), username_clone.clone(), MessageType::Public);
 
                             client.sender.send(message).map_err(|err| Error::Send(err))?;
                         }
@@ -80,17 +85,21 @@ pub async fn handle_client(stream: TcpStream, clients: Arc<Mutex<HashMap<String,
                 }
                 Err(err) => {
                     xeprintln!("Error reading buffer: ", err);
-                    return Ok(())
-                },
+                    clients_clone.lock().await.remove(&username_clone);
+                    return Ok(());
+                }
             }
         }
     });
 
-    let send_task : tokio::task::JoinHandle<Result<(), Error>> = tokio::spawn(async move {
+    let send_task = tokio::spawn(async move {
         while let Some(message) = rx.recv().await {
-            writer.write_all(&message.as_bytes()?).await.map_err(|err| Error::Write)?;
+            if let Err(err) = writer.write_all(&message.as_bytes()?).await {
+                xeprintln!("Failed to send message: ", err => Color::Crimson);
+                clients_clone2.lock().await.remove(&username_clone2);
+                return Err(Error::Write);
+            }
         }
-
         Ok(())
     });
 
@@ -123,7 +132,7 @@ impl Client {
                 std::io::stdin().read_line(&mut username).map_err(|err| Error::Read(err))?;
                 let username = username.trim().to_string();
 
-                if username.len() >= 3 {
+                if username.len() >= 3 && username.chars().all(|c| c.is_alphanumeric()) {
                     break username;
                 } else {
                     xeprintln!("Username must be at least 3 characters long." => Color::Orange);
@@ -139,7 +148,7 @@ impl Client {
                 return Ok(());
             }
 
-            writer.flush().await.map_err(|err| Error::Flush)?;
+            writer.flush().await.map_err(|_err| Error::Flush)?;
 
             xprintln!("Welcome, " => Color::BrightGreen, username => Color::Green, "! Type messages to send to other clients." => Color::BrightGreen);
 
@@ -150,20 +159,29 @@ impl Client {
                         Ok(0) => {
                             xprintln!("Server closed connection. Exiting..." => Color::BrightRed);
                             std::process::exit(0);
+
+                            break Ok(())
                         }
                         Ok(n) => {
-                            let response = String::from_utf8_lossy(&buffer[..n]);
-                            xprintln!(response);
-                            let _ = tokio::io::stdout().flush();
+                            let bytes = &buffer[..n];
+
+                            match Message::from_bytes(bytes) {
+                                Ok(response) => {
+                                    xprintln!(response.sender, " : ", response.content);
+                                }
+                                Err(err) => {
+                                    break Err(err);
+                                }
+                            }
+
+                            tokio::io::stdout().flush().await.map_err(|_err| Error::Flush)?;
                         }
                         Err(e) => {
-                            xeprintln!("Failed to read from server: ", e => Color::Crimson);
-                            break;
+                            break Err(Error::Read(e));
                         }
                     }
                 }
             });
-
             let send_task = tokio::spawn(async move {
                 loop {
                     tokio::io::stdout().flush().await?;
@@ -184,20 +202,21 @@ impl Client {
             });
 
             tokio::select! {
-    result = receive_task => {
-        if let Err(err) = result {
-            xeprintln!("Receive task error: ", err => Color::Crimson);
-        }
-    }
-    result = send_task => {
-        if let Err(err) = result {
-            xeprintln!("Send task error: ", err => Color::Crimson);
-        }
-    }
-}
+                result = receive_task => {
+                    if let Err(err) = result {
+                        xeprintln!("Receive task error: ", err => Color::Crimson);
+                        return Err(Error::JoinError(err));
+                    }
+                }
+                result = send_task => {
+                    if let Err(err) = result {
+                        xeprintln!("Send task error: ", err => Color::Crimson);
+                        return Err(Error::JoinError(err));
+                    }
+                }
+            }
         } else {
             xeprintln!("Failed to connect to server after", retries => Color::Crimson, "retries.");
-            return Err(Error::Send(SendError(Message::from("connecting", MessageType::Public))));
         }
 
         Ok(())

@@ -10,7 +10,6 @@ use crate::{Error, Message, MessageType};
 use crate::client::{handle_client, Client};
 
 pub struct Server {
-    pub address: String,
     pub listener: TcpListener,
     pub clients: Arc<Mutex<HashMap<String, Client>>>,
 }
@@ -30,7 +29,6 @@ impl Server {
         xprintln!("Server listening on " => Color::BrightGreen, address => Color::Green);
 
         Ok(Self {
-            address: address.to_string(),
             listener,
             clients: Arc::new(Mutex::new(HashMap::new())),
         })
@@ -61,7 +59,7 @@ impl Server {
                     let mut clients = self.clients.lock().await;
 
                     for (_, client) in clients.iter() {
-                        let message = Message::from("Server is shutting down...", MessageType::Public);
+                        let message = Message::from("Server is shutting down...", "Server".to_string(), MessageType::Public);
 
                         client.sender.send(message).map_err(|err| Error::Send(err))?;
                     }

@@ -62,6 +62,7 @@ impl Default for Color {
     }
 }
 
+#[allow(dead_code)]
 impl Color {
     pub fn to_rgba(&self) -> Option<(f32, f32, f32, f32)> {
         match *self {

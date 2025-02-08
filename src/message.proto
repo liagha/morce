@@ -3,8 +3,9 @@ syntax = "proto3";
 package chat;
 
 message ChatMessage {
-    string content = 1;
-    MessageType kind = 2;
+    string sender = 1;
+    string content = 2;
+    MessageType kind = 3;
 }
 
 enum MessageType {
