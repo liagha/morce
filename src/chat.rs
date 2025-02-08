@@ -2,10 +2,21 @@
 pub struct ChatMessage {
     #[prost(string, tag = "1")]
     pub sender: String,
-    #[prost(string, tag = "2")]
-    pub content: String,
-    #[prost(enumeration = "MessageType", tag = "3")]
+
+    #[prost(oneof = "MessageContent", tags = "2, 3")]
+    pub content: Option<MessageContent>,
+
+    #[prost(enumeration = "MessageType", tag = "4")]
     pub kind: i32,
+}
+
+#[derive(Clone, PartialEq, ::prost::Oneof)]
+pub enum MessageContent {
+    #[prost(string, tag = "2")]
+    Text(String),
+
+    #[prost(bytes, tag = "3")]
+    File(Vec<u8>),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
 #[repr(i32)]

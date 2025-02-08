@@ -1,18 +1,19 @@
 mod server;
 mod client;
 mod chat;
+mod message;
+
 use tokio::sync::mpsc;
 use std::env;
 use std::fmt::Formatter;
 use axo_core::{xeprintln, xprintln, Color};
 use tokio::sync::mpsc::error::SendError;
 use crate::client::Client;
+use crate::message::Message;
 use crate::server::Server;
 
 static SERVER: &str = "0.0.0.0:6000";
 static ADDR: &str = "192.168.100.195:6000";
-
-use chat::{ChatMessage};
 
 pub enum Error {
     ServerStart(std::io::Error),
@@ -49,61 +50,6 @@ impl core::fmt::Display for Error {
                 write!(f, "Task failed: {}", err)
             }
         }
-    }
-}
-
-#[derive(Copy, Clone)]
-pub enum MessageType {
-    Private = 0,
-    Public = 1
-}
-
-pub struct Message {
-    sender: String,
-    content: String,
-    kind: MessageType
-}
-
-impl Message {
-    pub fn from(msg: &str, from: String, kind: MessageType) -> Self {
-        Self {
-            sender: from,
-            content: msg.to_string(),
-            kind,
-        }
-    }
-
-    pub fn as_bytes(&self) -> Result<Vec<u8>, Error> {
-        use prost::Message;
-
-        let sender = self.sender.trim().to_string();
-        let content = self.content.trim().to_string();
-
-        let chat_message = ChatMessage {
-            sender,
-            content,
-            kind: self.kind as i32,
-        };
-        let mut buf = Vec::new();
-        chat_message.encode(&mut buf).map_err(|_| Error::MessageConversion)?;
-        Ok(buf)
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        use prost::Message;
-
-        let chat_message = ChatMessage::decode(bytes).map_err(|_| Error::MessageConversion)?;
-        let content = chat_message.content.trim().to_string();
-
-        Ok(Self {
-            sender: chat_message.sender,
-            content,
-            kind: match chat_message.kind {
-                0 => MessageType::Private,
-                1 => MessageType::Public,
-                _ => return Err(Error::MessageConversion),
-            },
-        })
     }
 }
 

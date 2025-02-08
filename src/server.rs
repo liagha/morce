@@ -6,8 +6,9 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
-use crate::{Error, Message, MessageType};
+use crate::{Error, Message};
 use crate::client::{handle_client, Client};
+use crate::message::MessageType;
 
 pub struct Server {
     pub listener: TcpListener,
