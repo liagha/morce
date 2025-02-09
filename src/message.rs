@@ -30,11 +30,11 @@ pub enum Content {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct FileData {
-    #[prost(string, tag = "1")]
-    pub name: String,
-
-    #[prost(bytes, tag = "2")]
+    #[prost(bytes, tag = "1")]
     pub data: Vec<u8>,
+
+    #[prost(string, tag = "2")]
+    pub name: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]

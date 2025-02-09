@@ -1,3 +1,4 @@
+// client.rs
 use tokio::time::Duration;
 use axo_core::{xeprintln, xprintln, Color};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -70,7 +71,6 @@ impl Client {
                                         Content::File(file_data) => {
                                             xprintln!(response.sender, " sent a file: ", file_data.name => Color::BrightBlue);
 
-                                            // Save the file to the filesystem with its original name
                                             if let Err(e) = Self::save_file(&file_data.name, &file_data.data).await {
                                                 xeprintln!("Failed to save file: ", e => Color::Crimson);
                                             } else {
@@ -115,6 +115,9 @@ impl Client {
                         } else {
                             xeprintln!("Failed to read file: ", file_path => Color::Orange);
                         }
+                    } else {
+                        let message = Message::from(input, username.clone(), MessageType::Public);
+                        writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
                     }
 
                     writer.flush().await.map_err(|e| Error::StreamFlushFailed(e))?;
