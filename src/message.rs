@@ -24,8 +24,17 @@ pub enum Content {
     #[prost(string, tag = "2")]
     Text(String),
 
-    #[prost(bytes, tag = "3")]
-    File(Vec<u8>),
+    #[prost(message, tag = "3")]
+    File(FileData),
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct FileData {
+    #[prost(string, tag = "1")]
+    pub name: String,
+
+    #[prost(bytes, tag = "2")]
+    pub data: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, prost::Enumeration)]
@@ -44,10 +53,13 @@ impl Message {
         }
     }
 
-    pub fn from_file(file_data: Vec<u8>, from: String, kind: MessageType) -> Self {
+    pub fn from_file(file_data: Vec<u8>, file_name: String, from: String, kind: MessageType) -> Self {
         Self {
             sender: from,
-            content: Content::File(file_data),
+            content: Content::File(FileData {
+                data: file_data,
+                name: file_name,
+            }),
             kind,
         }
     }

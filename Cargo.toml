@@ -7,4 +7,3 @@ edition = "2021"
 prost = "0.13.4"
 tokio = { version = "1.0", features = ["full"] }
 axo_core = { path = "axo_core" }
-chrono = "0.4.39"

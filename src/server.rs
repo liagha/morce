@@ -144,11 +144,11 @@ impl Server {
                                 }
                             }
                             Content::File(file_data) => {
-                                xprintln!(username => Color::BrightBlue, " sent a file." => Color::Blue);
+                                xprintln!(username => Color::BrightBlue, " sent a file: ", file_data.name => Color::Blue);
 
                                 for (_, client) in clients.lock().await.iter() {
                                     if client.username != username {
-                                        let message = Message::from_file(file_data.clone(), username.clone(), MessageType::Public);
+                                        let message = Message::from_file(file_data.data.clone(), file_data.name.clone(), username.clone(), MessageType::Public);
                                         client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
                                     }
                                 }

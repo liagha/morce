@@ -1,4 +1,3 @@
-// client.rs
 use tokio::time::Duration;
 use axo_core::{xeprintln, xprintln, Color};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -69,14 +68,13 @@ impl Client {
                                             xprintln!(response.sender, " : ", text);
                                         }
                                         Content::File(file_data) => {
-                                            xprintln!(response.sender, " sent a file. Saving..." => Color::BrightBlue);
+                                            xprintln!(response.sender, " sent a file: ", file_data.name => Color::BrightBlue);
 
-                                            // Save the file to the filesystem
-                                            let file_name = format!("received_file_{}.bin", chrono::Local::now().format("%Y%m%d_%H%M%S"));
-                                            if let Err(e) = Self::save_file(&file_name, &file_data).await {
+                                            // Save the file to the filesystem with its original name
+                                            if let Err(e) = Self::save_file(&file_data.name, &file_data.data).await {
                                                 xeprintln!("Failed to save file: ", e => Color::Crimson);
                                             } else {
-                                                xprintln!("File saved as: ", file_name => Color::BrightGreen);
+                                                xprintln!("File saved as: ", file_data.name => Color::BrightGreen);
                                             }
                                         }
                                     }
@@ -107,14 +105,16 @@ impl Client {
                     if input.starts_with("/file ") {
                         let file_path = input.trim_start_matches("/file ");
                         if let Ok(file_data) = Self::read_file(file_path).await {
-                            let message = Message::from_file(file_data, username.clone(), MessageType::Public);
+                            let file_name = Path::new(file_path)
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or("unknown_file")
+                                .to_string();
+                            let message = Message::from_file(file_data, file_name, username.clone(), MessageType::Public);
                             writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
                         } else {
                             xeprintln!("Failed to read file: ", file_path => Color::Orange);
                         }
-                    } else {
-                        let message = Message::from(input, username.clone(), MessageType::Public);
-                        writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
                     }
 
                     writer.flush().await.map_err(|e| Error::StreamFlushFailed(e))?;
