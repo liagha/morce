@@ -50,7 +50,7 @@ impl Client {
             xprintln!("Welcome, " => Color::BrightGreen, username => Color::Green, "! Type messages to send to other clients." => Color::BrightGreen);
 
             let receive_task : tokio::task::JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                let mut buffer = [0; 512];
+                let mut buffer = [0; 8192];
                 loop {
                     match reader.read(&mut buffer).await {
                         Ok(0) => {
@@ -104,18 +104,20 @@ impl Client {
 
                     if input.starts_with("/file ") {
                         let file_path = input.trim_start_matches("/file ");
-                        if let Ok(file_data) = Self::read_file(file_path).await {
-                            let file_name = Path::new(file_path)
-                                .file_name()
-                                .and_then(|name| name.to_str())
-                                .unwrap_or("unknown_file")
-                                .to_string();
-                            let message = Message::from_file(file_data, file_name, username.clone(), MessageType::Public);
-                            writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
-                        } else {
-                            xeprintln!("Failed to read file: ", file_path => Color::Orange);
-                        }
-                    } else {
+                        let file_name = Path::new(file_path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("unknown_file")
+                            .to_string();
+
+                        let mut file = File::open(file_path).await.map_err(|e| Error::InputReadFailed(e))?;
+                        let mut buffer = Vec::new();
+                        file.read_to_end(&mut buffer).await.map_err(|e| Error::InputReadFailed(e))?;
+
+                        let message = Message::from_file(buffer, file_name, username.clone(), MessageType::Public);
+                        writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
+                    }
+                    else {
                         let message = Message::from(input, username.clone(), MessageType::Public);
                         writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
                     }

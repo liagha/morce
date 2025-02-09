@@ -47,7 +47,7 @@ impl Server {
                 Ok((mut stream, addr)) = self.listener.accept() => {
                     xprintln!("New connection from " => Color::BrightBlue, addr => Color::Blue ; Debug);
 
-                    let mut buffer = [0; 512];
+                    let mut buffer = [0; 8192];
                     let n = stream.read(&mut buffer).await.map_err(|e| Error::MessageReceiveFailed(e))?;
 
                     if n == 0 {
