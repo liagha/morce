@@ -1,14 +1,16 @@
-// client.rs
-use tokio::time::Duration;
-use axo_core::{xeprintln, xprintln, Color};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio::time::sleep;
-use crate::{Address, Sender, Message};
-use crate::errors::Error;
 use std::path::Path;
-use tokio::fs::File;
-use crate::message::{Content, MessageType};
+use tokio::{
+    time::{sleep, Duration},
+    net::TcpStream,
+    io::{AsyncReadExt, AsyncWriteExt},
+    fs::File,
+};
+use crate::{
+    message::{Content, MessageType},
+    {Address, Sender, Message},
+    errors::Error,
+};
+use axo_core::{xeprintln, xprintln, Color};
 
 pub struct Client {
     pub username: String,
@@ -169,17 +171,9 @@ impl Client {
         None
     }
 
-    async fn read_file(file_path: &str) -> Result<Vec<u8>, Error> {
-        let path = Path::new(file_path);
-        let mut file = File::open(path).await.map_err(|e| Error::InputReadFailed(e))?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).await.map_err(|e| Error::InputReadFailed(e))?;
-        Ok(buffer)
-    }
-
     async fn save_file(file_name: &str, file_data: &[u8]) -> Result<(), Error> {
         let path = Path::new(file_name);
-        let mut file = File::create(path).await.map_err(|e| Error::InputReadFailed(e))?;
+        let mut file = File::create(path).await.map_err(|e| Error::FailedToCreateFile(e, path.as_os_str().to_string_lossy().to_string()))?;
         file.write_all(file_data).await.map_err(|e| Error::BytesWriteFailed(e))?;
         Ok(())
     }

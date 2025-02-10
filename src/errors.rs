@@ -1,4 +1,3 @@
-use std::fmt::Formatter;
 use crate::Message;
 
 pub enum Error {
@@ -8,6 +7,7 @@ pub enum Error {
     MessageReceiveFailed(std::io::Error),
     InputReadFailed(std::io::Error),
     TaskJoinFailed(tokio::task::JoinError),
+    FailedToCreateFile(std::io::Error, String),
     MessageWriteFailed,
     StreamFlushFailed(std::io::Error),
     MessageConversionFailed,
@@ -17,7 +17,7 @@ pub enum Error {
 }
 
 impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::ServerBindFailed(e) => {
                 write!(f, "Failed to bind the server to the target address: {}", e)
@@ -54,6 +54,9 @@ impl core::fmt::Display for Error {
             }
             Error::BytesWriteFailed(e) => {
                 write!(f, "Failed to write bytes to the stream: {}", e)
+            }
+            Error::FailedToCreateFile(e, path) => {
+                write!(f, "Failed to create file at {}: {}", path, e)
             }
         }
     }

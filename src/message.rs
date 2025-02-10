@@ -1,4 +1,3 @@
-// message.rs
 use crate::Error;
 
 pub struct Message {

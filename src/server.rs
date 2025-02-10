@@ -1,21 +1,20 @@
-// server.rs
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
-use axo_core::{xeprintln, xprintln, Color};
-use tokio::io::AsyncReadExt;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
-use tokio::time::sleep;
-use tokio::io::AsyncWriteExt;
-
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::Duration,
+};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::Mutex,
+    time::sleep,
+    io::{AsyncWriteExt, AsyncReadExt},
+};
 use crate::{
-    Message,
     client::Client,
     errors::Error,
-    message::MessageType,
+    message::{Message, MessageType, Content},
 };
-use crate::message::Content;
+use axo_core::{xeprintln, xprintln, Color};
 
 pub struct Server {
     pub listener: TcpListener,
@@ -97,7 +96,7 @@ impl Server {
         let clients_for_send = Arc::clone(&clients);
 
         let receive_task = tokio::spawn(async move {
-            let mut buffer = [0; 512];
+            let mut buffer = [0; 8192];
             loop {
                 match reader.read(&mut buffer).await {
                     Ok(0) => {
@@ -178,11 +177,13 @@ impl Server {
         result = receive_task => {
             if let Err(e) = result {
                 xeprintln!("Receive task error: ", e => Color::Crimson);
+                    return Err(Error::TaskJoinFailed(e));
             }
         }
         result = send_task => {
             if let Err(e) = result {
                 xeprintln!("Send task error: ", e => Color::Crimson);
+                    return Err(Error::TaskJoinFailed(e));
             }
         }
         }
