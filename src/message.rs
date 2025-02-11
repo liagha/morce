@@ -1,9 +1,13 @@
+use chrono::{DateTime, Timelike, Utc};
 use crate::Error;
+use crate::time::{CompactTimestamp, TimeConversion};
 
+#[derive(Debug, Clone)]
 pub struct Message {
     pub sender: String,
     pub content: Content,
     pub kind: MessageType,
+    pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -16,6 +20,9 @@ pub struct ChatMessage {
 
     #[prost(enumeration = "MessageType", tag = "4")]
     pub kind: i32,
+
+    #[prost(message, optional, tag = "5")]
+    pub timestamp: Option<CompactTimestamp>,
 }
 
 #[derive(Clone, PartialEq, prost::Oneof)]
@@ -43,12 +50,52 @@ pub enum MessageType {
     Public = 1,
 }
 
+impl core::fmt::Display for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.content.clone() {
+            Content::Text(text) => {
+                match self.kind.clone() {
+                    MessageType::Private => {
+                        let timestamp = self.timestamp.to_local();
+
+                        let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
+                        write!(f, "[Whisper] {} | {} : {}", time, self.sender, text)
+                    }
+                    MessageType::Public => {
+                        let timestamp = self.timestamp.to_local();
+
+                        let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
+                        write!(f, "{} | {} : {}", time, self.sender, text)
+                    }
+                }
+            }
+            Content::File(file) => {
+                match self.kind.clone() {
+                    MessageType::Private => {
+                        let timestamp = self.timestamp.to_local();
+
+                        let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
+                        write!(f, "[Whisper] {} | {} : Sent file => {}", time, self.sender, file.name)
+                    }
+                    MessageType::Public => {
+                        let timestamp = self.timestamp.to_local();
+
+                        let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
+                        write!(f, "{} | {} : Sent file => {}", time, self.sender, file.name)
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl Message {
     pub fn from(msg: &str, from: String, kind: MessageType) -> Self {
         Self {
             sender: from,
             content: Content::from(msg),
             kind,
+            timestamp: Utc::now(),
         }
     }
 
@@ -60,6 +107,7 @@ impl Message {
                 name: file_name,
             }),
             kind,
+            timestamp: Utc::now(),
         }
     }
 
@@ -67,14 +115,37 @@ impl Message {
         use prost::Message;
 
         let sender = self.sender.trim().to_string();
+        println!("┌─ Sender size: {}", format_size(sender.as_bytes().len()));
+
+        match &self.content {
+            Content::Text(text) => {
+                println!("├─ Content (Text) size: {}", format_size(text.as_bytes().len()));
+            }
+            Content::File(file_data) => {
+                println!("├─ Content (File) size breakdown:");
+                println!("├────── File data: {}", format_size(file_data.data.len()));
+                println!("├────── File name: {}", format_size(file_data.name.as_bytes().len()));
+                println!("├─ Total file content size: {}",
+                         format_size(file_data.data.len() + file_data.name.as_bytes().len()));
+            }
+        }
+
+        println!("├─ MessageType size: {}", format_size(size_of::<i32>()));
+
+        println!("├─ Timestamp size: {}", format_size(2 * size_of::<i64>()));
+
 
         let chat_message = ChatMessage {
             sender,
             content: Some(self.content.clone()),
             kind: self.kind as i32,
+            timestamp: Some(self.timestamp.to_timestamp()),
         };
         let mut buf = Vec::new();
         chat_message.encode(&mut buf).map_err(|_| Error::MessageConversionFailed)?;
+
+        println!("└─ Total encoded message size: {} bytes", format_size(buf.len()));
+
         Ok(buf)
     }
 
@@ -91,6 +162,8 @@ impl Message {
                 1 => MessageType::Public,
                 _ => return Err(Error::MessageConversionFailed),
             },
+
+            timestamp: chat_message.timestamp.map(|x| x.to_datetime()).unwrap_or_default(),
         })
     }
 }
@@ -135,5 +208,26 @@ impl MessageType {
             "PUBLIC" => Some(Self::Public),
             _ => None,
         }
+    }
+}
+
+fn format_size(size: usize) -> String {
+    let size = size as f64;
+
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    const TB: f64 = GB * 1024.0;
+
+    if size < KB {
+        format!("{:.0} B", size)
+    } else if size < MB {
+        format!("{:.2} KB", size / KB)
+    } else if size < GB {
+        format!("{:.2} MB", size / MB)
+    } else if size < TB {
+        format!("{:.2} GB", size / GB)
+    } else {
+        format!("{:.2} TB", size / TB)
     }
 }

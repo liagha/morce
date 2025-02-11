@@ -62,17 +62,14 @@ impl Client {
                         Ok(n) => {
                             let bytes = &buffer[..n];
 
-                            xprintln!("Size: ", format_size(bytes));
-
                             match Message::from_bytes(bytes) {
                                 Ok(response) => {
+                                    xprintln!(response);
+
                                     match response.content {
-                                        Content::Text(text) => {
-                                            xprintln!(response.sender, " : ", text);
+                                        Content::Text(_text) => {
                                         }
                                         Content::File(file_data) => {
-                                            xprintln!(response.sender, " sent a file: ", file_data.name => Color::BrightBlue);
-
                                             if let Err(e) = Self::save_file(&file_data.name, &file_data.data).await {
                                                 xeprintln!("Failed to save file: ", e => Color::Crimson);
                                             } else {
@@ -176,26 +173,5 @@ impl Client {
         let mut file = File::create(path).await.map_err(|e| Error::FailedToCreateFile(e, path.as_os_str().to_string_lossy().to_string()))?;
         file.write_all(file_data).await.map_err(|e| Error::BytesWriteFailed(e))?;
         Ok(())
-    }
-}
-
-fn format_size(bytes: &[u8]) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    const TB: f64 = GB * 1024.0;
-
-    let size = bytes.len() as f64;
-
-    if size < KB {
-        format!("{:.0} B", size)
-    } else if size < MB {
-        format!("{:.2} KB", size / KB)
-    } else if size < GB {
-        format!("{:.2} MB", size / MB)
-    } else if size < TB {
-        format!("{:.2} GB", size / GB)
-    } else {
-        format!("{:.2} TB", size / TB)
     }
 }

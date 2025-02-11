@@ -109,7 +109,7 @@ impl Server {
                         let message = Message::from_bytes(&buffer[..n])?;
 
                         match message.content {
-                            Content::Text(text) => {
+                            Content::Text(ref text) => {
                                 if text.starts_with('@') {
                                     if let Some((target, msg)) = text.split_once(' ') {
                                         let target_username = target.trim_start_matches('@');
@@ -133,7 +133,7 @@ impl Server {
                                     }
                                 }
 
-                                xprintln!(username => Color::BrightBlue, " : " => Color::Blue, text);
+                                xprintln!(message.clone());
 
                                 for (_, client) in clients.lock().await.iter() {
                                     if client.username != username {

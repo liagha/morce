@@ -2,7 +2,7 @@ mod server;
 mod client;
 mod message;
 mod errors;
-mod authentication;
+mod time;
 
 pub use {
     errors::Error,
