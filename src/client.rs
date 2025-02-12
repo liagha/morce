@@ -114,6 +114,7 @@ impl Client {
                         let message = Message::from_file(buffer, file_name, username.clone(), MessageType::Public);
                         let message_bytes = message.as_bytes()?;
 
+                        xprintln!("The message length sent: ", message_bytes.len());
                         writer.write_all(&message_bytes.len().to_be_bytes()).await.map_err(|e| Error::BytesWriteFailed(e))?;
 
                         for chunk in message_bytes.chunks(8192) {

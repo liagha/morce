@@ -101,7 +101,8 @@ impl Server {
                 let mut length_buffer = [0; 8];
                 reader.read_exact(&mut length_buffer).await.map_err(|e| Error::MessageReceiveFailed(e))?;
                 let length = usize::from_be_bytes(length_buffer);
-
+                xprintln!("Raw length bytes: ", length_buffer ; Debug);  // Print raw bytes
+                xprintln!("Test Length: ", length);
                 let mut message_bytes = Vec::with_capacity(length);
 
                 while message_bytes.len() < length {
