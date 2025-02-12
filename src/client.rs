@@ -38,8 +38,6 @@ impl Client {
                 }
             };
 
-            xprintln!("Sending username: " => Color::BrightBlue, username => Color::Blue);
-
             let (mut reader, mut writer) = stream.into_split();
 
             if let Err(e) = writer.write_all(username.as_bytes()).await {
@@ -114,11 +112,22 @@ impl Client {
                         file.read_to_end(&mut buffer).await.map_err(|e| Error::InputReadFailed(e))?;
 
                         let message = Message::from_file(buffer, file_name, username.clone(), MessageType::Public);
-                        writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
-                    }
-                    else {
+                        let message_bytes = message.as_bytes()?;
+
+                        writer.write_all(&message_bytes.len().to_be_bytes()).await.map_err(|e| Error::BytesWriteFailed(e))?;
+
+                        for chunk in message_bytes.chunks(8192) {
+                            writer.write_all(chunk).await.map_err(|e| Error::BytesWriteFailed(e))?;
+                        }
+                    } else {
                         let message = Message::from(input, username.clone(), MessageType::Public);
-                        writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
+                        let message_bytes = message.as_bytes()?;
+
+                        writer.write_all(&message_bytes.len().to_be_bytes()).await.map_err(|e| Error::BytesWriteFailed(e))?;
+
+                        for chunk in message_bytes.chunks(8192) {
+                            writer.write_all(chunk).await.map_err(|e| Error::BytesWriteFailed(e))?;
+                        }
                     }
 
                     writer.flush().await.map_err(|e| Error::StreamFlushFailed(e))?;
