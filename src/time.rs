@@ -1,16 +1,8 @@
 use chrono::{DateTime, Datelike, FixedOffset, Local, Utc};
 
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct CompactTimestamp {
-    #[prost(int32, tag = "1")]
-    pub seconds: i32,
-}
-
 pub trait TimeConversion {
-    fn to_timestamp(&self) -> CompactTimestamp {
-        CompactTimestamp {
-            seconds: 0,
-        }
+    fn to_timestamp(&self) -> i32 {
+        0
     }
     fn to_datetime(&self) -> DateTime<Utc> {
         DateTime::default()
@@ -64,10 +56,8 @@ pub trait TimeConversion {
 }
 
 impl TimeConversion for DateTime<Utc> {
-    fn to_timestamp(&self) -> CompactTimestamp {
-        CompactTimestamp {
-            seconds: self.timestamp() as i32,
-        }
+    fn to_timestamp(&self) -> i32 {
+            self.timestamp() as i32
     }
     fn convert_to_jalali(&mut self) {
         let (year, month, day) = (self.year(), self.month(), self.day());
@@ -89,10 +79,8 @@ impl TimeConversion for DateTime<Utc> {
 }
 
 impl TimeConversion for DateTime<Local> {
-    fn to_timestamp(&self) -> CompactTimestamp {
-        CompactTimestamp {
-            seconds: self.timestamp() as i32,
-        }
+    fn to_timestamp(&self) -> i32 {
+            self.timestamp() as i32
     }
     fn is_persian(&self) -> bool {
         *self.offset() == FixedOffset::east_opt(3 * 3600 + 30 * 60).unwrap()
@@ -106,8 +94,8 @@ impl TimeConversion for DateTime<Local> {
     }
 }
 
-impl TimeConversion for CompactTimestamp {
+impl TimeConversion for i32 {
     fn to_datetime(&self) -> DateTime<Utc> {
-        DateTime::from_timestamp(self.seconds as i64, 0).unwrap_or_default()
+        DateTime::from_timestamp(*self as i64, 0).unwrap_or_default()
     }
 }

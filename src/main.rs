@@ -17,6 +17,7 @@ use {
 
 static SERVER: &str = "0.0.0.0:6000";
 static ADDR: &str = "192.168.100.195:6000";
+const BUFFER_SIZE: usize = 8192;
 
 pub type Sender = tokio::sync::mpsc::UnboundedSender<Message>;
 pub type Receiver = tokio::sync::mpsc::UnboundedReceiver<Message>;

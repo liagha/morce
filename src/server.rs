@@ -46,7 +46,7 @@ impl Server {
                 Ok((mut stream, addr)) = self.listener.accept() => {
                     xprintln!("New connection from " => Color::BrightBlue, addr => Color::Blue ; Debug);
 
-                    let mut buffer = [0; 8192];
+                    let mut buffer = [0; crate::BUFFER_SIZE];
                     let n = stream.read(&mut buffer).await.map_err(|e| Error::MessageReceiveFailed(e))?;
 
                     if n == 0 {
@@ -95,72 +95,68 @@ impl Server {
         let username_for_send = username.clone();
         let clients_for_send = Arc::clone(&clients);
 
-        let receive_task : tokio::task::JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-            let mut buffer = [0; 8192];
+        let receive_task = tokio::spawn(async move {
+            let mut buffer = [0; crate::BUFFER_SIZE];
             loop {
-                let mut length_buffer = [0; 8];
-                reader.read_exact(&mut length_buffer).await.map_err(|e| Error::MessageReceiveFailed(e))?;
-                let length = usize::from_be_bytes(length_buffer);
-                xprintln!("Raw length bytes: ", length_buffer ; Debug);  // Print raw bytes
-                xprintln!("Test Length: ", length);
-                let mut message_bytes = Vec::with_capacity(length);
+                match reader.read(&mut buffer).await {
+                    Ok(0) => {
+                        xprintln!("User '" => Color::BrightRed, username => Color::Crimson, "' disconnected." => Color::BrightRed);
 
-                while message_bytes.len() < length {
-                    let remaining = length - message_bytes.len();
-                    let chunk_size = std::cmp::min(remaining, buffer.len());
-                    let n = reader.read(&mut buffer[..chunk_size]).await.map_err(|e| {
-                        Error::MessageReceiveFailed(e)
-                    })?;
-                    message_bytes.extend_from_slice(&buffer[..n]);
-                }
+                        clients.lock().await.remove(&username);
+                        return Ok(());
+                    }
+                    Ok(n) => {
+                        let message = Message::from_bytes(&buffer[..n])?;
 
-                let message = Message::from_bytes(&message_bytes)?;
+                        match message.content {
+                            Content::Text(ref text) => {
+                                if text.starts_with('@') {
+                                    if let Some((target, msg)) = text.split_once(' ') {
+                                        let target_username = target.trim_start_matches('@');
 
-                xprintln!("Message Length: ", length);
+                                        if let Some(client) = clients.lock().await.get(target_username) {
+                                            xprintln!("Private message from " => Color::BrightBlue, "'", username, "'", " to " => Color::BrightBlue, "'", target_username, "'", " : ", msg => Color::Blue);
 
-                match message.content {
-                    Content::Text(ref text) => {
-                        if text.starts_with('@') {
-                            if let Some((target, msg)) = text.split_once(' ') {
-                                let target_username = target.trim_start_matches('@');
+                                            let message = Message::from(msg, username.clone(), MessageType::Private);
+                                            client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                        } else {
+                                            xprintln!("User '" => Color::Red, username, "' tried to message '" => Color::Red, target_username, "', but they are not online." => Color::Red);
 
-                                if let Some(client) = clients.lock().await.get(target_username) {
-                                    xprintln!("Private message from " => Color::BrightBlue, "'", username, "'", " to " => Color::BrightBlue, "'", target_username, "'", " : ", msg => Color::Blue);
-
-                                    let message = Message::from(msg, username.clone(), MessageType::Private);
-                                    client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
-                                } else {
-                                    xprintln!("User '" => Color::Red, username, "' tried to message '" => Color::Red, target_username, "', but they are not online." => Color::Red);
-
-                                    if let Some(sender) = clients.lock().await.get(&username) {
-                                        let message = Message::from("User not found", "Server".to_string(), MessageType::Private);
-                                        sender.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                            if let Some(sender) = clients.lock().await.get(&username) {
+                                                let message = Message::from("User not found", "Server".to_string(), MessageType::Private);
+                                                sender.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                            }
+                                        }
+                                        continue;
+                                    } else {
+                                        return Err(Error::MessageConversionFailed);
                                     }
                                 }
-                                continue;
-                            } else {
-                                return Err(Error::MessageConversionFailed);
+
+                                xprintln!(message.clone());
+
+                                for (_, client) in clients.lock().await.iter() {
+                                    if client.username != username {
+                                        let message = Message::from(text.as_str(), username.clone(), MessageType::Public);
+                                        client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                    }
+                                }
                             }
-                        }
+                            Content::File(file_data) => {
+                                xprintln!(username => Color::BrightBlue, " sent a file: ", file_data.name => Color::Blue);
 
-                        xprintln!(message.clone());
-
-                        for (_, client) in clients.lock().await.iter() {
-                            if client.username != username {
-                                let message = Message::from(text.as_str(), username.clone(), MessageType::Public);
-                                client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                for (_, client) in clients.lock().await.iter() {
+                                    if client.username != username {
+                                        let message = Message::from_file(file_data.data.clone(), file_data.name.clone(), username.clone(), MessageType::Public);
+                                        client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                    }
+                                }
                             }
                         }
                     }
-                    Content::File(file_data) => {
-                        xprintln!(username => Color::BrightBlue, " sent a file: ", file_data.name => Color::Blue);
-
-                        for (_, client) in clients.lock().await.iter() {
-                            if client.username != username {
-                                let message = Message::from_file(file_data.data.clone(), file_data.name.clone(), username.clone(), MessageType::Public);
-                                client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
-                            }
-                        }
+                    Err(e) => {
+                        clients.lock().await.remove(&username);
+                        return Err(Error::MessageReceiveFailed(e));
                     }
                 }
             }
@@ -180,13 +176,11 @@ impl Server {
         tokio::select! {
         result = receive_task => {
             if let Err(e) = result {
-                xeprintln!("Receive task error: ", e => Color::Crimson);
                     return Err(Error::TaskJoinFailed(e));
             }
         }
         result = send_task => {
             if let Err(e) = result {
-                xeprintln!("Send task error: ", e => Color::Crimson);
                     return Err(Error::TaskJoinFailed(e));
             }
         }

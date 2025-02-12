@@ -8,6 +8,7 @@ pub enum Error {
     InputReadFailed(std::io::Error),
     TaskJoinFailed(tokio::task::JoinError),
     FailedToCreateFile(std::io::Error, String),
+    MessageIDConversionFailed,
     MessageWriteFailed,
     StreamFlushFailed(std::io::Error),
     MessageConversionFailed,
@@ -57,6 +58,9 @@ impl core::fmt::Display for Error {
             }
             Error::FailedToCreateFile(e, path) => {
                 write!(f, "Failed to create file at {}: {}", path, e)
+            }
+            Error::MessageIDConversionFailed => {
+                write!(f, "Failed to convert the message id")
             }
         }
     }

@@ -38,6 +38,8 @@ impl Client {
                 }
             };
 
+            xprintln!("Sending username: " => Color::BrightBlue, username => Color::Blue);
+
             let (mut reader, mut writer) = stream.into_split();
 
             if let Err(e) = writer.write_all(username.as_bytes()).await {
@@ -50,7 +52,7 @@ impl Client {
             xprintln!("Welcome, " => Color::BrightGreen, username => Color::Green, "! Type messages to send to other clients." => Color::BrightGreen);
 
             let receive_task : tokio::task::JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                let mut buffer = [0; 8192];
+                let mut buffer = [0; crate::BUFFER_SIZE];
                 loop {
                     match reader.read(&mut buffer).await {
                         Ok(0) => {
@@ -69,7 +71,7 @@ impl Client {
                                         }
                                         Content::File(file_data) => {
                                             if let Err(e) = Self::save_file(&file_data.name, &file_data.data).await {
-                                                xeprintln!("Failed to save file: ", e => Color::Crimson);
+                                                return Err(e);
                                             } else {
                                                 xprintln!("File saved as: ", file_data.name => Color::BrightGreen);
                                             }
@@ -112,23 +114,11 @@ impl Client {
                         file.read_to_end(&mut buffer).await.map_err(|e| Error::InputReadFailed(e))?;
 
                         let message = Message::from_file(buffer, file_name, username.clone(), MessageType::Public);
-                        let message_bytes = message.as_bytes()?;
-
-                        xprintln!("The message length sent: ", message_bytes.len());
-                        writer.write_all(&message_bytes.len().to_be_bytes()).await.map_err(|e| Error::BytesWriteFailed(e))?;
-
-                        for chunk in message_bytes.chunks(8192) {
-                            writer.write_all(chunk).await.map_err(|e| Error::BytesWriteFailed(e))?;
-                        }
-                    } else {
+                        writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
+                    }
+                    else {
                         let message = Message::from(input, username.clone(), MessageType::Public);
-                        let message_bytes = message.as_bytes()?;
-
-                        writer.write_all(&message_bytes.len().to_be_bytes()).await.map_err(|e| Error::BytesWriteFailed(e))?;
-
-                        for chunk in message_bytes.chunks(8192) {
-                            writer.write_all(chunk).await.map_err(|e| Error::BytesWriteFailed(e))?;
-                        }
+                        writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
                     }
 
                     writer.flush().await.map_err(|e| Error::StreamFlushFailed(e))?;
@@ -138,13 +128,11 @@ impl Client {
             tokio::select! {
                 result = receive_task => {
                     if let Err(e) = result {
-                        xeprintln!("Receive task error: ", e => Color::Crimson);
                         return Err(Error::TaskJoinFailed(e));
                     }
                 }
                 result = send_task => {
                     if let Err(e) = result {
-                        xeprintln!("Send task error: ", e => Color::Crimson);
                         return Err(Error::TaskJoinFailed(e));
                     }
                 }

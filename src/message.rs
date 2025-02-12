@@ -1,9 +1,11 @@
 use chrono::{DateTime, Timelike, Utc};
+use uuid::Uuid;
 use crate::Error;
-use crate::time::{CompactTimestamp, TimeConversion};
+use crate::time::TimeConversion;
 
 #[derive(Debug, Clone)]
 pub struct Message {
+    pub id: Uuid,
     pub sender: String,
     pub content: Content,
     pub kind: MessageType,
@@ -12,25 +14,28 @@ pub struct Message {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChatMessage {
-    #[prost(string, tag = "1")]
+    #[prost(bytes, tag = "1")]
+    pub id: Vec<u8>,
+
+    #[prost(string, tag = "2")]
     pub sender: String,
 
-    #[prost(oneof = "Content", tags = "2, 3")]
+    #[prost(oneof = "Content", tags = "3, 4")]
     pub content: Option<Content>,
 
-    #[prost(enumeration = "MessageType", tag = "4")]
+    #[prost(enumeration = "MessageType", tag = "5")]
     pub kind: i32,
 
-    #[prost(message, optional, tag = "5")]
-    pub timestamp: Option<CompactTimestamp>,
+    #[prost(int32, tag = "6")]
+    pub timestamp: i32,
 }
 
 #[derive(Clone, PartialEq, prost::Oneof)]
 pub enum Content {
-    #[prost(string, tag = "2")]
+    #[prost(string, tag = "3")]
     Text(String),
 
-    #[prost(message, tag = "3")]
+    #[prost(message, tag = "4")]
     File(FileData),
 }
 
@@ -52,6 +57,8 @@ pub enum MessageType {
 
 impl core::fmt::Display for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let id = self.id;
+
         match self.content.clone() {
             Content::Text(text) => {
                 match self.kind.clone() {
@@ -59,13 +66,13 @@ impl core::fmt::Display for Message {
                         let timestamp = self.timestamp.to_local();
 
                         let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
-                        write!(f, "[Whisper] {} | {} : {}", time, self.sender, text)
+                        write!(f, "{} [Whisper] {} | {} : {}", id, time, self.sender, text)
                     }
                     MessageType::Public => {
                         let timestamp = self.timestamp.to_local();
 
                         let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
-                        write!(f, "{} | {} : {}", time, self.sender, text)
+                        write!(f, "{} ] {} | {} : {}", id, time, self.sender, text)
                     }
                 }
             }
@@ -75,13 +82,13 @@ impl core::fmt::Display for Message {
                         let timestamp = self.timestamp.to_local();
 
                         let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
-                        write!(f, "[Whisper] {} | {} : Sent file => {}", time, self.sender, file.name)
+                        write!(f, "{} [Whisper] {} | {} : Sent file => {}", id, time, self.sender, file.name)
                     }
                     MessageType::Public => {
                         let timestamp = self.timestamp.to_local();
 
                         let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
-                        write!(f, "{} | {} : Sent file => {}", time, self.sender, file.name)
+                        write!(f, "{} ] {} | {} : Sent file => {}", id, time, self.sender, file.name)
                     }
                 }
             }
@@ -92,6 +99,7 @@ impl core::fmt::Display for Message {
 impl Message {
     pub fn from(msg: &str, from: String, kind: MessageType) -> Self {
         Self {
+            id: Uuid::new_v4(),
             sender: from,
             content: Content::from(msg),
             kind,
@@ -101,6 +109,7 @@ impl Message {
 
     pub fn from_file(file_data: Vec<u8>, file_name: String, from: String, kind: MessageType) -> Self {
         Self {
+            id: Uuid::new_v4(),
             sender: from,
             content: Content::File(FileData {
                 data: file_data,
@@ -136,15 +145,16 @@ impl Message {
 
 
         let chat_message = ChatMessage {
+            id: self.id.as_bytes().into(),
             sender,
             content: Some(self.content.clone()),
             kind: self.kind as i32,
-            timestamp: Some(self.timestamp.to_timestamp()),
+            timestamp: self.timestamp.to_timestamp(),
         };
         let mut buf = Vec::new();
         chat_message.encode(&mut buf).map_err(|_| Error::MessageConversionFailed)?;
 
-        println!("└─ Total encoded message size: {} bytes", format_size(buf.len()));
+        println!("└─ Total encoded message size: {}", format_size(buf.len()));
 
         Ok(buf)
     }
@@ -153,8 +163,11 @@ impl Message {
         use prost::Message;
 
         let chat_message = ChatMessage::decode(bytes).map_err(|_| Error::MessageConversionFailed)?;
+        let id = Uuid::from_bytes(
+            chat_message.id.try_into().unwrap());
 
         Ok(Self {
+            id,
             sender: chat_message.sender,
             content: chat_message.content.unwrap_or_default(),
             kind: match chat_message.kind {
@@ -163,7 +176,7 @@ impl Message {
                 _ => return Err(Error::MessageConversionFailed),
             },
 
-            timestamp: chat_message.timestamp.map(|x| x.to_datetime()).unwrap_or_default(),
+            timestamp: chat_message.timestamp.to_datetime(),
         })
     }
 }
