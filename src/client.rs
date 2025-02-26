@@ -139,12 +139,14 @@ impl Client {
                         let mut buffer = Vec::new();
                         file.read_to_end(&mut buffer).await.map_err(|e| Error::InputReadFailed(e))?;
 
-                        let message = Message::from_file(buffer, file_name, username.clone(), MessageType::Public);
+                        let message = Message::from_file(buffer, file_name.clone(), username.clone(), MessageType::Public);
                         let message_bytes = message.as_bytes()?;
                         let message_len = message_bytes.len() as u64;
 
                         writer.write_all(&message_len.to_be_bytes()).await
                             .map_err(|e| Error::BytesWriteFailed(e))?;
+
+                        xprintln!("Sending chunks for file {", file_name, "} : ", message_len);
 
                         for chunk in message_bytes.chunks(BUFFER_SIZE) {
                             writer.write_all(chunk).await

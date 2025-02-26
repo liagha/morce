@@ -5,7 +5,7 @@ use crate::time::TimeConversion;
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    pub id: Uuid,
+    //pub id: Uuid,
     pub sender: String,
     pub content: Content,
     pub kind: MessageType,
@@ -14,8 +14,8 @@ pub struct Message {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ChatMessage {
-    #[prost(bytes, tag = "1")]
-    pub id: Vec<u8>,
+    //#[prost(bytes, tag = "1")]
+    //pub id: Vec<u8>,
 
     #[prost(string, tag = "2")]
     pub sender: String,
@@ -99,7 +99,7 @@ impl core::fmt::Display for Message {
 impl Message {
     pub fn from(msg: &str, from: String, kind: MessageType) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            //id: Uuid::new_v4(),
             sender: from,
             content: Content::from(msg),
             kind,
@@ -109,7 +109,7 @@ impl Message {
 
     pub fn from_file(file_data: Vec<u8>, file_name: String, from: String, kind: MessageType) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            //id: Uuid::new_v4(),
             sender: from,
             content: Content::File(FileData {
                 data: file_data,
@@ -145,7 +145,7 @@ impl Message {
 
 
         let chat_message = ChatMessage {
-            id: self.id.as_bytes().into(),
+            //id: self.id.as_bytes().into(),
             sender,
             content: Some(self.content.clone()),
             kind: self.kind as i32,
@@ -163,11 +163,10 @@ impl Message {
         use prost::Message;
 
         let chat_message = ChatMessage::decode(bytes).map_err(|_| Error::MessageConversionFailed)?;
-        let id = Uuid::from_bytes(
-            chat_message.id.try_into().unwrap());
+        //let id = Uuid::from_bytes(chat_message.id.try_into().unwrap());
 
         Ok(Self {
-            id,
+            //id,
             sender: chat_message.sender,
             content: chat_message.content.unwrap_or_default(),
             kind: match chat_message.kind {
