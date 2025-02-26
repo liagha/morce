@@ -165,6 +165,7 @@ impl Message {
         let chat_message = ChatMessage::decode(bytes).map_err(|_| Error::MessageConversionFailed)?;
         //let id = Uuid::from_bytes(chat_message.id.try_into().unwrap());
 
+
         Ok(Self {
             //id,
             sender: chat_message.sender,
