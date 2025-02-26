@@ -5,11 +5,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     fs::File,
 };
-use crate::{
-    message::{Content, MessageType},
-    {Address, Sender, Message},
-    errors::Error,
-};
+use crate::{message::{Content, MessageType}, {Address, Sender, Message}, errors::Error, BUFFER_SIZE};
 use axo_core::{xeprintln, xprintln, Color};
 
 pub struct Client {
@@ -52,22 +48,53 @@ impl Client {
             xprintln!("Welcome, " => Color::BrightGreen, username => Color::Green, "! Type messages to send to other clients." => Color::BrightGreen);
 
             let receive_task : tokio::task::JoinHandle<Result<(), Error>> = tokio::spawn(async move {
-                let mut buffer = [0; crate::BUFFER_SIZE];
+                let mut length_buffer = [0; 8]; // Buffer for the 8-byte message length
+
                 loop {
-                    match reader.read(&mut buffer).await {
+                    // Read the message length first (8-byte u64)
+                    match reader.read_exact(&mut length_buffer).await {
                         Ok(0) => {
                             xprintln!("Server closed connection. Exiting..." => Color::BrightRed);
                             std::process::exit(0);
                         }
-                        Ok(n) => {
-                            let bytes = &buffer[..n];
+                        Ok(_n) => {
+                            // Convert 8 bytes to u64 (message length)
+                            let message_length = u64::from_be_bytes(length_buffer);
 
-                            match Message::from_bytes(bytes) {
+                            // Create a buffer to hold the entire message
+                            let mut message_buffer = vec![0; message_length as usize];
+                            let mut bytes_read = 0;
+
+                            // Read message in chunks until we've read the full message
+                            while bytes_read < message_length as usize {
+                                let remaining = message_length as usize - bytes_read;
+                                let chunk_size = std::cmp::min(remaining, BUFFER_SIZE);
+
+                                match reader.read(&mut message_buffer[bytes_read..(bytes_read + chunk_size)]).await {
+                                    Ok(n) if n > 0 => {
+                                        bytes_read += n;
+                                    }
+                                    Ok(0) => {
+                                        xprintln!("Server closed connection. Exiting..." => Color::BrightRed);
+                                        std::process::exit(0);
+                                    }
+                                    Ok(_) => {
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        return Err(Error::MessageReceiveFailed(e));
+                                    }
+                                }
+                            }
+
+                            // Process the complete message
+                            match Message::from_bytes(&message_buffer) {
                                 Ok(response) => {
                                     xprintln!(response);
 
                                     match response.content {
                                         Content::Text(_text) => {
+                                            // Handle text message
                                         }
                                         Content::File(file_data) => {
                                             if let Err(e) = Self::save_file(&file_data.name, &file_data.data).await {
@@ -79,19 +106,18 @@ impl Client {
                                     }
                                 }
                                 Err(e) => {
-                                    break Err(e);
+                                    return Err(e);
                                 }
                             }
 
                             tokio::io::stdout().flush().await.map_err(|e| Error::StreamFlushFailed(e))?;
                         }
                         Err(e) => {
-                            break Err(Error::MessageReceiveFailed(e));
+                            return Err(Error::MessageReceiveFailed(e));
                         }
                     }
                 }
             });
-
             let send_task : tokio::task::JoinHandle<Result<(), Error>> = tokio::spawn(async move {
                 loop {
                     tokio::io::stdout().flush().await.map_err(|e| Error::StreamFlushFailed(e))?;
@@ -114,11 +140,31 @@ impl Client {
                         file.read_to_end(&mut buffer).await.map_err(|e| Error::InputReadFailed(e))?;
 
                         let message = Message::from_file(buffer, file_name, username.clone(), MessageType::Public);
-                        writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
+                        let message_bytes = message.as_bytes()?;
+                        let message_len = message_bytes.len() as u64;
+
+                        writer.write_all(&message_len.to_be_bytes()).await
+                            .map_err(|e| Error::BytesWriteFailed(e))?;
+
+                        for chunk in message_bytes.chunks(BUFFER_SIZE) {
+                            writer.write_all(chunk).await
+                                .map_err(|e| Error::BytesWriteFailed(e))?;
+                        }
                     }
                     else {
                         let message = Message::from(input, username.clone(), MessageType::Public);
-                        writer.write_all(&message.as_bytes()?).await.map_err(|e| Error::BytesWriteFailed(e))?;
+                        let message_bytes = message.as_bytes()?;
+                        let message_len = message_bytes.len() as u64;
+
+                        // Send message length as 8-byte u64
+                        writer.write_all(&message_len.to_be_bytes()).await
+                            .map_err(|e| Error::BytesWriteFailed(e))?;
+
+                        // Send message in chunks
+                        for chunk in message_bytes.chunks(BUFFER_SIZE) {
+                            writer.write_all(chunk).await
+                                .map_err(|e| Error::BytesWriteFailed(e))?;
+                        }
                     }
 
                     writer.flush().await.map_err(|e| Error::StreamFlushFailed(e))?;

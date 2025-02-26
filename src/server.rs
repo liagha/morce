@@ -83,6 +83,7 @@ impl Server {
         Ok(())
     }
 
+    // Updated server.rs handle_client function with chunked message receiving
     pub async fn handle_client(clients: Arc<Mutex<HashMap<String, Client>>>, username: String, stream: TcpStream) -> Result<(), Error> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -96,61 +97,96 @@ impl Server {
         let clients_for_send = Arc::clone(&clients);
 
         let receive_task = tokio::spawn(async move {
-            let mut buffer = [0; crate::BUFFER_SIZE];
+            let mut length_buffer = [0; 8]; // Buffer for the 8-byte message length
+
             loop {
-                match reader.read(&mut buffer).await {
-                    Ok(0) => {
-                        xprintln!("User '" => Color::BrightRed, username => Color::Crimson, "' disconnected." => Color::BrightRed);
+                // Read the message length first (8-byte u64)
+                match reader.read_exact(&mut length_buffer).await {
+                    Ok(_) => {
+                        // Convert 8 bytes to u64 (message length)
+                        let message_length = u64::from_be_bytes(length_buffer);
 
-                        clients.lock().await.remove(&username);
-                        return Ok(());
-                    }
-                    Ok(n) => {
-                        let message = Message::from_bytes(&buffer[..n])?;
+                        // Create a buffer to hold the entire message
+                        let mut message_buffer = vec![0; message_length as usize];
+                        let mut bytes_read = 0;
 
-                        match message.content {
-                            Content::Text(ref text) => {
-                                if text.starts_with('@') {
-                                    if let Some((target, msg)) = text.split_once(' ') {
-                                        let target_username = target.trim_start_matches('@');
+                        // Read message in chunks until we've read the full message
+                        while bytes_read < message_length as usize {
+                            let remaining = message_length as usize - bytes_read;
+                            let chunk_size = std::cmp::min(remaining, crate::BUFFER_SIZE);
 
-                                        if let Some(client) = clients.lock().await.get(target_username) {
-                                            xprintln!("Private message from " => Color::BrightBlue, "'", username, "'", " to " => Color::BrightBlue, "'", target_username, "'", " : ", msg => Color::Blue);
+                            match reader.read(&mut message_buffer[bytes_read..(bytes_read + chunk_size)]).await {
+                                Ok(n) if n > 0 => {
+                                    bytes_read += n;
+                                }
+                                Ok(0) => {
+                                    xprintln!("User '" => Color::BrightRed, username => Color::Crimson, "' disconnected during message read." => Color::BrightRed);
+                                    clients.lock().await.remove(&username);
+                                    return Ok(());
+                                }
+                                Ok(_) => {
+                                    continue;
+                                }
+                                Err(e) => {
+                                    clients.lock().await.remove(&username);
+                                    return Err(Error::MessageReceiveFailed(e));
+                                }
+                            }
+                        }
 
-                                            let message = Message::from(msg, username.clone(), MessageType::Private);
-                                            client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
-                                        } else {
-                                            xprintln!("User '" => Color::Red, username, "' tried to message '" => Color::Red, target_username, "', but they are not online." => Color::Red);
+                        // Process the complete message
+                        match Message::from_bytes(&message_buffer) {
+                            Ok(message) => {
+                                match message.content {
+                                    Content::Text(ref text) => {
+                                        if text.starts_with('@') {
+                                            if let Some((target, msg)) = text.split_once(' ') {
+                                                let target_username = target.trim_start_matches('@');
 
-                                            if let Some(sender) = clients.lock().await.get(&username) {
-                                                let message = Message::from("User not found", "Server".to_string(), MessageType::Private);
-                                                sender.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                                if let Some(client) = clients.lock().await.get(target_username) {
+                                                    xprintln!("Private message from " => Color::BrightBlue, "'", username, "'", " to " => Color::BrightBlue, "'", target_username, "'", " : ", msg => Color::Blue);
+
+                                                    let message = Message::from(msg, username.clone(), MessageType::Private);
+                                                    client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                                } else {
+                                                    xprintln!("User '" => Color::Red, username, "' tried to message '" => Color::Red, target_username, "', but they are not online." => Color::Red);
+
+                                                    if let Some(sender) = clients.lock().await.get(&username) {
+                                                        let message = Message::from("User not found", "Server".to_string(), MessageType::Private);
+                                                        sender.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                                    }
+                                                }
+                                                continue;
+                                            } else {
+                                                return Err(Error::MessageConversionFailed);
                                             }
                                         }
-                                        continue;
-                                    } else {
-                                        return Err(Error::MessageConversionFailed);
+
+                                        xprintln!(message.clone());
+
+                                        for (_, client) in clients.lock().await.iter() {
+                                            if client.username != username {
+                                                let message = Message::from(text.as_str(), username.clone(), MessageType::Public);
+                                                client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                            }
+                                        }
                                     }
-                                }
+                                    Content::File(file_data) => {
+                                        xprintln!(username => Color::BrightBlue, " sent a file: ", file_data.name => Color::Blue);
 
-                                xprintln!(message.clone());
-
-                                for (_, client) in clients.lock().await.iter() {
-                                    if client.username != username {
-                                        let message = Message::from(text.as_str(), username.clone(), MessageType::Public);
-                                        client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                        for (_, client) in clients.lock().await.iter() {
+                                            if client.username != username {
+                                                let message = Message::from_file(file_data.data.clone(), file_data.name.clone(), username.clone(), MessageType::Public);
+                                                client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            Content::File(file_data) => {
-                                xprintln!(username => Color::BrightBlue, " sent a file: ", file_data.name => Color::Blue);
-
-                                for (_, client) in clients.lock().await.iter() {
-                                    if client.username != username {
-                                        let message = Message::from_file(file_data.data.clone(), file_data.name.clone(), username.clone(), MessageType::Public);
-                                        client.sender.send(message).map_err(|e| Error::MessageSendFailed(e))?;
-                                    }
-                                }
+                            Err(e) => {
+                                xeprintln!("Error parsing message from '" => Color::Red, username, "': " => Color::Red, e);
+                                // Continue listening even if one message fails to parse
+                                continue;
                             }
                         }
                     }
@@ -164,27 +200,48 @@ impl Server {
 
         let send_task = tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
-                if let Err(e) = writer.write_all(&message.as_bytes()?).await {
+                let message_bytes = message.as_bytes()?;
+                let message_len = message_bytes.len() as u64;
+
+                // Send message length first (8-byte u64)
+                if let Err(e) = writer.write_all(&message_len.to_be_bytes()).await {
                     let mut clients = clients_for_send.lock().await;
                     clients.remove(&username_for_send);
                     return Err(Error::BytesWriteFailed(e));
+                }
+
+                // Send message in chunks
+                for chunk in message_bytes.chunks(crate::BUFFER_SIZE) {
+                    if let Err(e) = writer.write_all(chunk).await {
+                        let mut clients = clients_for_send.lock().await;
+                        clients.remove(&username_for_send);
+                        return Err(Error::BytesWriteFailed(e));
+                    }
+                }
+
+                if let Err(e) = writer.flush().await {
+                    let mut clients = clients_for_send.lock().await;
+                    clients.remove(&username_for_send);
+                    return Err(Error::StreamFlushFailed(e));
                 }
             }
             Ok(())
         });
 
         tokio::select! {
-        result = receive_task => {
-            if let Err(e) = result {
-                    return Err(Error::TaskJoinFailed(e));
-            }
+    result = receive_task => {
+        if let Err(e) = result {
+            xeprintln!("Receive task error: ", e => Color::Crimson);
+                return Err(Error::TaskJoinFailed(e));
         }
-        result = send_task => {
-            if let Err(e) = result {
-                    return Err(Error::TaskJoinFailed(e));
-            }
+    }
+    result = send_task => {
+        if let Err(e) = result {
+            xeprintln!("Send task error: ", e => Color::Crimson);
+                return Err(Error::TaskJoinFailed(e));
         }
-        }
+    }
+    }
 
         Ok(())
     }

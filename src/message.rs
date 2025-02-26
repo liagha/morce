@@ -57,7 +57,7 @@ pub enum MessageType {
 
 impl core::fmt::Display for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let id = self.id;
+        //let id = self.id;
 
         match self.content.clone() {
             Content::Text(text) => {
@@ -66,13 +66,13 @@ impl core::fmt::Display for Message {
                         let timestamp = self.timestamp.to_local();
 
                         let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
-                        write!(f, "{} [Whisper] {} | {} : {}", id, time, self.sender, text)
+                        write!(f, "[Whisper] {} | {} : {}", time, self.sender, text)
                     }
                     MessageType::Public => {
                         let timestamp = self.timestamp.to_local();
 
                         let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
-                        write!(f, "{} ] {} | {} : {}", id, time, self.sender, text)
+                        write!(f, "{} | {} : {}", time, self.sender, text)
                     }
                 }
             }
@@ -82,13 +82,13 @@ impl core::fmt::Display for Message {
                         let timestamp = self.timestamp.to_local();
 
                         let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
-                        write!(f, "{} [Whisper] {} | {} : Sent file => {}", id, time, self.sender, file.name)
+                        write!(f, "[Whisper] {} | {} : Sent file => {}", time, self.sender, file.name)
                     }
                     MessageType::Public => {
                         let timestamp = self.timestamp.to_local();
 
                         let time = format!("{}:{}:{}", timestamp.hour(), timestamp.minute(), timestamp.second());
-                        write!(f, "{} ] {} | {} : Sent file => {}", id, time, self.sender, file.name)
+                        write!(f, "{} | {} : Sent file => {}", time, self.sender, file.name)
                     }
                 }
             }
