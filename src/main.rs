@@ -1,9 +1,13 @@
+#![feature(string_from_utf8_lossy_owned)]
+
 mod server;
 mod client;
 mod message;
 mod errors;
 mod time;
 
+use std::hash::{Hash, Hasher};
+use tokio::sync::mpsc::error::SendError;
 pub use {
     errors::Error,
     client::Client,
@@ -19,7 +23,36 @@ static SERVER: &str = "0.0.0.0:6000";
 static ADDR: &str = "192.168.100.195:6000";
 const BUFFER_SIZE: usize = 8192;
 
-pub type Sender = tokio::sync::mpsc::UnboundedSender<Message>;
+#[derive(Clone)]
+pub struct Sender {
+    sender: tokio::sync::mpsc::UnboundedSender<Message>,
+}
+
+impl Sender {
+    pub fn new() -> Self {
+        let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+
+        Self {
+            sender: tx
+        }
+    }
+    pub fn from(tx: tokio::sync::mpsc::UnboundedSender<Message>) -> Self {
+        Self {
+            sender: tx
+        }
+    }
+    pub fn send(&self, message: Message) -> Result<(), SendError<Message>> {
+        self.sender.send(message)
+    }
+}
+
+impl Hash for Sender {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let ptr = &self.sender as *const tokio::sync::mpsc::UnboundedSender<Message>;
+        ptr.hash(state);
+    }
+}
+
 pub type Receiver = tokio::sync::mpsc::UnboundedReceiver<Message>;
 pub type Address = String;
 
@@ -60,7 +93,8 @@ async fn main() {
             };
 
             if let Err(e) = Client::run_client(address.to_string()).await {
-                xeprintln!("Client error: ", e => Color::Crimson);
+                xeprintln!(e);
+                std::process::exit(0);
             }
         }
     }

@@ -1,4 +1,4 @@
-use crate::Message;
+use crate::{Message};
 
 pub enum Error {
     ServerBindFailed(std::io::Error),
@@ -8,13 +8,14 @@ pub enum Error {
     InputReadFailed(std::io::Error),
     TaskJoinFailed(tokio::task::JoinError),
     FailedToCreateFile(std::io::Error, String),
-    MessageIDConversionFailed,
-    MessageWriteFailed,
     StreamFlushFailed(std::io::Error),
-    MessageConversionFailed,
+    MessageEncodeFailed(prost::EncodeError),
+    MessageDecodeFailed(prost::DecodeError),
+    ConnectionFailed(u8),
+    MessageWriteFailed,
     InvalidUsername,
-    ConnectionFailed,
-    ClientDisconnected,
+    ClientDisconnected(String, Box<Error>),
+    Disconnected(Box<Error>),
 }
 
 impl core::fmt::Display for Error {
@@ -30,37 +31,40 @@ impl core::fmt::Display for Error {
                 write!(f, "Failed to receive message: {}", e)
             }
             Error::TaskJoinFailed(e) => {
-                write!(f, "Task failed to join: {}", e)
+                write!(f, "Task failed to join: {}!", e)
             }
             Error::MessageWriteFailed => {
-                write!(f, "Failed to write message to the stream")
+                write!(f, "Failed to write message to the stream!")
             }
             Error::StreamFlushFailed(e) => {
-                write!(f, "Failed to flush the stream: {}", e)
+                write!(f, "Failed to flush the stream: {}!", e)
             }
-            Error::MessageConversionFailed => {
-                write!(f, "Failed to convert message to/from bytes")
+            Error::MessageEncodeFailed(e) => {
+                write!(f, "Failed to encode message to bytes: {}!", e)
+            }
+            Error::MessageDecodeFailed(e) => {
+                write!(f, "Failed to decode message from bytes: {}!", e)
             }
             Error::InvalidUsername => {
-                write!(f, "Invalid username: must be at least 3 alphanumeric characters")
+                write!(f, "Invalid username: must be at least 3 alphanumeric characters!")
             }
-            Error::ConnectionFailed => {
-                write!(f, "Failed to establish a connection to the server")
+            Error::ConnectionFailed(retries) => {
+                write!(f, "Failed to establish a connection to the server after {} retries!", retries)
             }
-            Error::ClientDisconnected => {
-                write!(f, "Client disconnected from the server")
+            Error::ClientDisconnected(name, e) => {
+                write!(f, "{} is disconnected from the server: {}!", name, e)
             }
             Error::InputReadFailed(e) => {
-                write!(f, "Failed to read input from io: {}", e)
+                write!(f, "Failed to read input from io: {}!", e)
             }
             Error::BytesWriteFailed(e) => {
-                write!(f, "Failed to write bytes to the stream: {}", e)
+                write!(f, "Failed to write bytes to the stream: {}!", e)
             }
             Error::FailedToCreateFile(e, path) => {
-                write!(f, "Failed to create file at {}: {}", path, e)
+                write!(f, "Failed to create file at {}: {}!", path, e)
             }
-            Error::MessageIDConversionFailed => {
-                write!(f, "Failed to convert the message id")
+            Error::Disconnected(e) => {
+                write!(f, "Client is disconnected from the server: {}!", e)
             }
         }
     }

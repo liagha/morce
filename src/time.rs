@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, FixedOffset, Local, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, Local, Timelike, Utc};
 
 pub trait TimeConversion {
     fn to_timestamp(&self) -> i32 {
@@ -17,6 +17,8 @@ pub trait TimeConversion {
     fn to_local(&self) -> DateTime<Local> {
         DateTime::default()
     }
+
+    fn to_str(&self) -> String { "".to_string() }
 
     fn gregorian_to_jalali(g_y: i32, g_m: u32, g_d: u32) -> (i32, u32, u32) {
         let g_days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -66,7 +68,6 @@ impl TimeConversion for DateTime<Utc> {
         *self = self.with_month(j_month).unwrap();
         *self = self.with_day(j_day).unwrap();
     }
-
     fn to_local(&self) -> DateTime<Local> {
         let mut time = self.with_timezone(&Local);
 
@@ -75,6 +76,9 @@ impl TimeConversion for DateTime<Utc> {
         }
 
         time
+    }
+    fn to_str(&self) -> String {
+        format!("{:02}:{:02}:{:02}", self.hour(), self.minute(), self.second())
     }
 }
 
@@ -91,6 +95,9 @@ impl TimeConversion for DateTime<Local> {
         *self = self.with_year(j_year).unwrap();
         *self = self.with_month(j_month).unwrap();
         *self = self.with_day(j_day).unwrap();
+    }
+    fn to_str(&self) -> String {
+        format!("{:02}:{:02}:{:02}", self.hour(), self.minute(), self.second())
     }
 }
 
