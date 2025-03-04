@@ -3,13 +3,13 @@ use std::{
     time::Duration,
     collections::HashSet,
 };
-use std::io::ErrorKind;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::Mutex,
     time::sleep,
     io::{AsyncWriteExt, AsyncReadExt},
 };
+use tokio::time::timeout;
 use crate::{client::Client, errors::Error, message::{Message, Content}, Sender};
 use axo_core::{xeprintln, xprintln, Color};
 
@@ -70,7 +70,14 @@ impl Server {
     async fn handle_client(clients: Arc<Mutex<HashSet<Client>>>, username: String, stream: TcpStream) -> Result<(), Error> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let client = Client { username: username.clone(), sender: Sender::from(tx) };
-        clients.lock().await.insert(client);
+
+        let mut client_list = clients.lock().await;
+        if client_list.contains(&client) {
+            xeprintln!("Username '", username, "' is already in use." => Color::Crimson);
+            return Err(Error::UsernameTaken);
+        }
+        client_list.insert(client.clone());
+        drop(client_list);
 
         xprintln!("User '" => Color::Magenta, username => Color::Pink, "' joined the chat." => Color::Magenta);
 
@@ -78,23 +85,42 @@ impl Server {
         let username_for_send = username.clone();
         let clients_for_send = Arc::clone(&clients);
 
-        let receive_task = tokio::spawn(Self::receive_messages(clients, username, reader));
-        let send_task = tokio::spawn(Self::send_messages(clients_for_send, username_for_send, writer, rx));
+        let receive_task = tokio::spawn(Self::receive_messages(clients, username.clone(), reader));
+        let send_task = tokio::spawn(Self::send_messages(clients_for_send.clone(), username_for_send, writer, rx));
 
-        tokio::select! {
-            result = receive_task => result.map_err(|e| Error::TaskJoinFailed(e))??,
-            result = send_task => result.map_err(|e| Error::TaskJoinFailed(e))??,
+        match tokio::select! {
+            result = receive_task => result,
+            result = send_task => result,
+        } {
+            Ok(inner_result) => {
+                match inner_result {
+                    Ok(_) => Ok(()),
+                    Err(error) => {
+                        xprintln!("Client '" => Color::Crimson, username, "' disconnected: " => Color::Crimson, error => Color::Yellow);
+                        Self::remove_user(&clients_for_send, &username).await;
+                        Err(error)
+                    }
+                }
+            }
+            Err(join_error) => {
+                xeprintln!("Task join error for '", username, "': ", join_error => Color::Crimson);
+                Self::remove_user(&clients_for_send, &username).await;
+                Err(Error::TaskJoinFailed(join_error))
+            }
         }
-
-        Ok(())
     }
 
     async fn receive_messages(clients: Arc<Mutex<HashSet<Client>>>, username: String, mut reader: tokio::net::tcp::OwnedReadHalf) -> Result<(), Error> {
         let mut length_buffer = [0; 8];
+        let mut last_activity = tokio::time::Instant::now();
+        const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(10);
 
         loop {
-            match reader.read_exact(&mut length_buffer).await {
-                Ok(_) => {
+            let read_result = timeout(HEARTBEAT_TIMEOUT, reader.read_exact(&mut length_buffer)).await;
+
+            match read_result {
+                Ok(Ok(_)) => {
+                    last_activity = tokio::time::Instant::now();
                     let message_length = u64::from_be_bytes(length_buffer);
                     let mut message_buffer = vec![0; message_length as usize];
                     let mut bytes_read = 0;
@@ -106,20 +132,17 @@ impl Server {
                         match reader.read(&mut message_buffer[bytes_read..(bytes_read + chunk_size)]).await {
                             Ok(n) if n > 0 => {
                                 bytes_read += n;
+                                last_activity = tokio::time::Instant::now();
                             }
                             Ok(_) => continue,
                             Err(e) => {
                                 xeprintln!("Error reading message from '", username, "': ", e => Color::Crimson);
                                 Self::remove_user(&clients, &username).await;
-
-                                if e.kind() == ErrorKind::UnexpectedEof {
-                                    return Err(Error::ClientDisconnected(username, Error::MessageReceiveFailed(e).into()));
-                                }
-
                                 return Err(Error::MessageReceiveFailed(e));
                             }
                         }
                     }
+
                     match Message::from_bytes(&message_buffer) {
                         Ok(message) => {
                             match message.content {
@@ -143,14 +166,16 @@ impl Server {
                         }
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     Self::remove_user(&clients, &username).await;
-
-                    if e.kind() == ErrorKind::UnexpectedEof {
-                        return Err(Error::ClientDisconnected(username, Error::MessageReceiveFailed(e).into()));
-                    }
-
                     return Err(Error::MessageReceiveFailed(e));
+                }
+                Err(_) => {
+                    if last_activity.elapsed() > HEARTBEAT_TIMEOUT {
+                        xeprintln!("No heartbeat from '", username, "' - disconnecting" => Color::Yellow);
+                        Self::remove_user(&clients, &username).await;
+                        return Err(Error::ClientDisconnected(username, Error::HeartBeatTimeOut.into()));
+                    }
                 }
             }
         }

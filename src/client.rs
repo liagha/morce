@@ -67,13 +67,13 @@ impl Client {
         let send_task = tokio::spawn(Self::send_messages(writer_arc.clone(), username_arc.clone()));
         let heartbeat_task = tokio::spawn(Self::send_heartbeat(writer_arc.clone(), username_arc.clone()));
 
-        tokio::select! {
-            result = heartbeat_task => result.map_err(|e| Error::TaskJoinFailed(e))??,
-            result = receive_task => result.map_err(|e| Error::TaskJoinFailed(e))??,
-            result = send_task => result.map_err(|e| Error::TaskJoinFailed(e))??,
-        }
+        let result = tokio::select! {
+            result = heartbeat_task => result.map_err(|e| Error::TaskJoinFailed(e))?,
+            result = receive_task => result.map_err(|e| Error::TaskJoinFailed(e))?,
+            result = send_task => result.map_err(|e| Error::TaskJoinFailed(e))?,
+        };
 
-        Ok(())
+        result
     }
 
     async fn receive_messages(mut reader: tokio::net::tcp::OwnedReadHalf) -> Result<(), Error> {
@@ -82,7 +82,8 @@ impl Client {
         loop {
             match reader.read_exact(&mut length_buffer).await {
                 Ok(0) => {
-                    continue
+                    xprintln!("Server connection closed." => Color::Yellow);
+                    return Err(Error::Disconnected(Box::new(Error::ServerClosed)));
                 }
                 Ok(_n) => {
                     let message_length = u64::from_be_bytes(length_buffer);
@@ -145,6 +146,7 @@ impl Client {
                         return Err(Error::Disconnected(Error::MessageReceiveFailed(e).into()));
                     }
 
+                    xeprintln!("Error receiving messages: " => Color::Crimson, e => Color::Red);
                     return Err(Error::MessageReceiveFailed(e));
                 }
             }
@@ -210,7 +212,7 @@ impl Client {
 
     async fn send_heartbeat(writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, username: Arc<String>) -> Result<(), Error> {
         loop {
-            sleep(Duration::from_secs(1)).await;
+            sleep(Duration::from_secs(5)).await;
 
             let heartbeat_message = Message::from_code(0, &username.clone());
             let heartbeat_bytes = heartbeat_message.as_bytes()?;

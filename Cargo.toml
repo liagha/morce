@@ -1,10 +1,10 @@
 [package]
-name = "Messenger"
+name = "morce"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-prost = { version =  "0", features = ["derive"] }
 tokio = { version = "1.0", features = ["full"] }
 chrono = { version = "0.4.39", default-features = false, features = ["alloc", "std", "clock", "now"]}
 axo_core = { path = "axo_core" }
+orbyte = "0.0.3"

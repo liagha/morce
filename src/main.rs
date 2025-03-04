@@ -1,5 +1,3 @@
-#![feature(string_from_utf8_lossy_owned)]
-
 mod server;
 mod client;
 mod message;
@@ -57,12 +55,12 @@ pub type Receiver = tokio::sync::mpsc::UnboundedReceiver<Message>;
 pub type Address = String;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Error> {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
         xeprintln!("Usage: ", args[0], " [server|client]");
-        return;
+        return Ok(());
     }
 
     match args[1].as_str() {
@@ -74,16 +72,10 @@ async fn main() {
                 SERVER
             };
 
-            match Server::start(address).await {
-                Ok(server) => {
-                    if let Err(e) = server.run().await {
-                        xeprintln!("Server error: ", e => Color::Crimson);
-                    }
-                }
-                Err(e) => {
-                    xeprintln!("Server start error: ", e => Color::Crimson);
-                }
-            }
+            let server = Server::start(address).await?;
+            server.run().await?;
+
+            Ok(())
         }
         _ => {
             let address = if let Some(address) = args.get(2) {
@@ -92,9 +84,19 @@ async fn main() {
                 ADDR
             };
 
-            if let Err(e) = Client::run_client(address.to_string()).await {
-                xeprintln!(e);
-                std::process::exit(0);
+
+            match Client::run_client(address.to_string()).await {
+                Ok(_) => {
+                    Ok(())
+                }
+                Err(Error::Disconnected(e)) => {
+                    xeprintln!(Error::Disconnected(e));
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    xeprintln!("Client error: " => Color::Crimson, e => Color::Red);
+                    Err(e)
+                }
             }
         }
     }

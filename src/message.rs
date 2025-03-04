@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc};
+use orbyte::Serialize;
+use orbyte::Deserialize;
 use crate::Error;
 use crate::time::TimeConversion;
-
 use axo_core::xprintln;
 
 #[derive(Debug, Clone)]
@@ -11,36 +12,28 @@ pub struct Message {
     pub timestamp: DateTime<Utc>,
 }
 
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, orbyte::Orbyte)]
 pub struct ChatMessage {
-    #[prost(string, tag = "1")]
     pub sender: String,
 
-    #[prost(oneof = "Content", tags = "2, 3, 4")]
     pub content: Option<Content>,
 
-    #[prost(int32, optional, tag = "5")]
     pub timestamp: Option<i32>,
 }
 
-#[derive(Clone, PartialEq, prost::Oneof)]
+#[derive(Clone, PartialEq, orbyte::Orbyte, Debug)]
 pub enum Content {
-    #[prost(string, tag = "2")]
     Text(String),
 
-    #[prost(message, tag = "3")]
     File(FileData),
 
-    #[prost(uint32, tag = "4")]
-    Signal(u32)
+    Signal(u8)
 }
 
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, orbyte::Orbyte, Debug)]
 pub struct FileData {
-    #[prost(bytes, tag = "1")]
     pub data: Vec<u8>,
 
-    #[prost(string, tag = "2")]
     pub name: String,
 }
 
@@ -97,14 +90,12 @@ impl Message {
     pub fn from_code(code: u8, from: &String) -> Self {
         Self {
             sender: from.to_string(),
-            content: Content::Signal(code as u32),
+            content: Content::Signal(code),
             timestamp: Utc::now(),
         }
     }
 
     pub fn as_bytes(&self) -> Result<Vec<u8>, Error> {
-        use prost::Message;
-
         let sender = self.sender.trim().to_string();
 
         xprintln!("┌─ Sender size: ", format_size(sender.as_bytes().len()));
@@ -116,8 +107,7 @@ impl Message {
                 timestamp: Some(self.timestamp.to_timestamp()),
             };
 
-        let mut buf = Vec::new();
-        chat_message.encode(&mut buf).map_err(|e| Error::MessageEncodeFailed(e))?;
+        let buf = chat_message.serialize();
 
         match &self.content {
             Content::Text(text) => {
@@ -144,9 +134,7 @@ impl Message {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        use prost::Message;
-
-        let chat_message = ChatMessage::decode(bytes).map_err(|e| Error::MessageDecodeFailed(e))?;
+        let chat_message = ChatMessage::deserialize(bytes).ok_or(Error::MessageDecodeFailed)?;
 
         Ok(Self {
             sender: chat_message.sender,
