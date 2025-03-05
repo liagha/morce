@@ -1,5 +1,4 @@
-use axo_core::Color;
-use axo_core::colors::ColoredText;
+use broccli::{ colors::Color, colors::ColoredText };
 use crate::{Message};
 
 pub enum Error {
