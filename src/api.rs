@@ -8,6 +8,7 @@ use crate::predicate::Predicate;
 use crate::store::Store;
 use crate::format;
 use crate::parse;
+use crate::guard;
 
 pub struct State {
     pub store: std::sync::Arc<Memory>,
@@ -37,6 +38,10 @@ pub async fn create(
     body: web::Bytes,
 ) -> actix_web::Result<HttpResponse> {
     let tags = extract_tags(&req);
+    let resource = tags.get("in").and_then(|v| v.parse::<Uuid>().ok());
+    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok());
+    guard::check(&*state.store, auth_header, "create", resource).await?;
+
     let entity = state.store.create(body, tags).await?;
     state.hub.publish(&entity);
     Ok(HttpResponse::Created()
@@ -68,6 +73,9 @@ pub async fn update(
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
     let tags = extract_tags(&req);
+    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok());
+    guard::check(&*state.store, auth_header, "update", Some(id)).await?;
+
     let entity = state.store.update(id, body, tags).await?;
     state.hub.publish(&entity);
     Ok(HttpResponse::Ok()
@@ -79,8 +87,12 @@ pub async fn update(
 pub async fn delete(
     state: web::Data<State>,
     path: web::Path<Uuid>,
+    req: HttpRequest,
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
+    let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok());
+    guard::check(&*state.store, auth_header, "delete", Some(id)).await?;
+
     state.store.delete(id).await?;
     Ok(HttpResponse::NoContent().finish())
 }
@@ -97,6 +109,28 @@ pub async fn query(
         predicate.insert(key, val);
     }
     let entities = state.store.query(&predicate).await?;
+    Ok(HttpResponse::Ok()
+        .content_type("text/plain; charset=utf-8")
+        .body(format::entity_list(&entities)))
+}
+
+pub async fn eval(
+    state: web::Data<State>,
+    path: web::Path<Uuid>,
+) -> actix_web::Result<HttpResponse> {
+    let id = path.into_inner();
+    let query_entity = state.store.read(id).await?
+        .ok_or(actix_web::error::ErrorNotFound("query not found"))?;
+
+    let key = query_entity.tags.get("key").ok_or(actix_web::error::ErrorBadRequest("missing key"))?;
+    let test = query_entity.tags.get("test").ok_or(actix_web::error::ErrorBadRequest("missing test"))?;
+    let value = query_entity.tags.get("value").ok_or(actix_web::error::ErrorBadRequest("missing value"))?;
+
+    let entities = match test.as_str() {
+        "prefix" => state.store.query_prefix(key, value).await?,
+        _ => return Err(actix_web::error::ErrorBadRequest("unknown test")),
+    };
+
     Ok(HttpResponse::Ok()
         .content_type("text/plain; charset=utf-8")
         .body(format::entity_list(&entities)))

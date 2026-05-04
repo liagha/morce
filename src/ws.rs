@@ -3,6 +3,7 @@ use actix_ws;
 use futures_util::StreamExt;
 
 use crate::api::State;
+use crate::format;
 use crate::parse;
 
 pub async fn handler(
@@ -30,7 +31,7 @@ pub async fn handler(
                     let mut sender = session.clone();
                     actix_web::rt::spawn(async move {
                         while let Some(entity) = rx.recv().await {
-                            let text = format!("ev {}", entity.id);
+                            let text = format::entity(&entity);
                             let _ = sender.text(text).await;
                         }
                     });

@@ -81,6 +81,19 @@ impl Store for Memory {
             Ok(result)
         }
     }
+
+    async fn query_prefix(&self, key: &str, value: &str) -> Result<Vec<Entity>, Error> {
+        let mut result = Vec::new();
+        for entry in self.items.iter() {
+            let entity = entry.value();
+            if let Some(tag_val) = entity.tags.get(key) {
+                if tag_val.starts_with(value) {
+                    result.push(entity.clone());
+                }
+            }
+        }
+        Ok(result)
+    }
 }
 
 fn matches_predicate(tags: &BTreeMap<String, String>, predicate: &Predicate) -> bool {

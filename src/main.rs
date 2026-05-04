@@ -9,6 +9,7 @@ mod ws;
 mod console;
 mod parse;
 mod format;
+mod guard;
 
 use actix_web::{web, App, HttpServer};
 use std::sync::Arc;
@@ -38,6 +39,7 @@ async fn main() -> std::io::Result<()> {
             .route("/entities/{id}", web::get().to(api::read))
             .route("/entities/{id}", web::put().to(api::update))
             .route("/entities/{id}", web::delete().to(api::delete))
+            .route("/eval/{id}", web::get().to(api::eval))
             .route("/ws", web::get().to(ws::handler))
             .route("/console", web::get().to(console::page))
     })

@@ -38,4 +38,5 @@ pub trait Store: Send + Sync {
     async fn update(&self, id: Uuid, load: bytes::Bytes, tags: BTreeMap<String, String>) -> Result<Entity, Error>;
     async fn delete(&self, id: Uuid) -> Result<(), Error>;
     async fn query(&self, predicate: &Predicate) -> Result<Vec<Entity>, Error>;
+    async fn query_prefix(&self, key: &str, value: &str) -> Result<Vec<Entity>, Error>;
 }
