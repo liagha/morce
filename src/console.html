@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>morce terminal</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a0a0a; color: #0f0; font-family: monospace; height: 100vh; display: flex; flex-direction: column; }
+        #output { flex: 1; overflow-y: auto; padding: 12px; white-space: pre-wrap; word-break: break-all; }
+        #input-line { display: flex; align-items: center; padding: 8px 12px; border-top: 1px solid #1a1a1a; }
+        .prompt { color: #0f0; margin-right: 8px; user-select: none; }
+        #input { background: transparent; border: none; color: #0f0; font-family: monospace; font-size: 14px; flex: 1; outline: none; }
+        #suggest { color: #0a0; font-size: 13px; padding: 4px 12px; border-top: 1px solid #1a1a1a; min-height: 22px; max-height: 40px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+<div id="output"></div>
+<div id="suggest"></div>
+<div id="input-line"><span class="prompt">&gt;</span><input id="input" autofocus></div>
+<script>
+    const out = document.getElementById('output');
+    const suggest = document.getElementById('suggest');
+    const inp = document.getElementById('input');
+    let log = (text) => { out.textContent += text + '\n'; out.scrollTop = out.scrollHeight; };
+
+    let names = [];
+
+    function tokenize(str) {
+        let tokens = [];
+        let current = '';
+        let inQuotes = false;
+        for (let ch of str) {
+            if (ch === '"') { inQuotes = !inQuotes; current += ch; }
+            else if (ch === ' ' && !inQuotes) { if (current) tokens.push(current); current = ''; }
+            else { current += ch; }
+        }
+        if (current) tokens.push(current);
+        return tokens;
+    }
+
+    function parseTagsAndLoad(tokens) {
+        let tagList = [];
+        let loadParts = [];
+        for (let t of tokens) {
+            let eq = t.indexOf('=');
+            if (eq > 0 && t[0] !== '"') {
+                let key = t.slice(0, eq);
+                let val = t.slice(eq+1);
+                if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+                tagList.push(key + '=' + val);
+            } else {
+                loadParts.push(t.replace(/^"|"$/g, ''));
+            }
+        }
+        return { tags: tagList.join(','), load: loadParts.join(' ') };
+    }
+
+    async function fetchNames() {
+        try {
+            let resp = await fetch('/entities?kind=name');
+            let text = await resp.text();
+            let lines = text.split('\n');
+            names = [];
+            for (let line of lines) {
+                if (line.startsWith('tags:')) {
+                    let tagPart = line.slice(5);
+                    let pairs = tagPart.split(',');
+                    for (let pair of pairs) {
+                        let eq = pair.indexOf('=');
+                        if (eq > 0 && pair.slice(0,eq) === 'name') {
+                            names.push(pair.slice(eq+1));
+                        }
+                    }
+                }
+            }
+        } catch(e) {}
+    }
+
+    function addName(name) {
+        if (!names.includes(name)) names.push(name);
+    }
+
+    async function resolveNames(raw) {
+        let pattern = /@(\w[\w-]*)/g;
+        let matches = [...raw.matchAll(pattern)];
+        let resolved = raw;
+        for (let match of matches) {
+            let name = match[1];
+            try {
+                let query = 'kind=name&name=' + name;
+                let resp = await fetch('/entities?' + query);
+                let text = await resp.text();
+                let lines = text.split('\n');
+                let target = null;
+                for (let line of lines) {
+                    if (line.startsWith('tags:')) {
+                        let tagPart = line.slice(5);
+                        let pairs = tagPart.split(',');
+                        for (let pair of pairs) {
+                            let eq = pair.indexOf('=');
+                            if (eq > 0) {
+                                let k = pair.slice(0, eq);
+                                let v = pair.slice(eq+1);
+                                if (k === 'target') { target = v; break; }
+                            }
+                        }
+                    }
+                    if (target) break;
+                }
+                if (target) { resolved = resolved.replace(match[0], target); }
+            } catch (e) {}
+        }
+        return resolved;
+    }
+
+    function autoCompleteNames(raw) {
+        return raw.replace(/@(\w[\w-]*)/g, (match, prefix) => {
+            if (prefix === '') return match;
+            let found = names.filter(n => n.startsWith(prefix));
+            if (found.length === 1) return '@' + found[0];
+            return match;
+        });
+    }
+
+    let commands = ['create', 'read', 'query', 'update', 'delete', 'ws', 'sub', 'help'];
+    let tagKeys = ['kind', 'name', 'in', 'from', 'to', 'by', 'on', 'at', 'title', 'target', 'body'];
+
+    function completion(text) {
+        let last = text.lastIndexOf(' ');
+        let head = last < 0 ? '' : text.slice(0, last+1);
+        let word = last < 0 ? text : text.slice(last+1);
+        if (!word) return null;
+
+        if (head.trim() === '') {
+            let cmdMatch = commands.filter(c => c.startsWith(word));
+            if (cmdMatch.length) return head + (cmdMatch.length === 1 ? cmdMatch[0] + ' ' : cmdMatch[0]);
+        }
+
+        if (word.startsWith('@')) {
+            let prefix = word.slice(1);
+            let match = names.filter(n => n.startsWith(prefix));
+            return match.length === 1 ? head + '@' + match[0] + ' ' : (match.length ? head + '@' + match[0] : null);
+        }
+
+        if (word.endsWith('=')) return null;
+
+        let lastEq = word.lastIndexOf('=');
+        if (lastEq > 0) {
+            let key = word.slice(0, lastEq);
+            let val = word.slice(lastEq+1);
+            if (key === 'kind') {
+                let kinds = ['user', 'channel', 'msg', 'post', 'name', 'like', 'typing', 'read', 'setting'];
+                let match = kinds.filter(k => k.startsWith(val));
+                return match.length === 1 ? head + key + '=' + match[0] + ' ' : (match.length ? head + key + '=' + match[0] : null);
+            }
+            return null;
+        }
+
+        let match = tagKeys.filter(k => k.startsWith(word));
+        return match.length === 1 ? head + match[0] + '=' : (match.length ? head + match[0] : null);
+    }
+
+    function showSuggestion(text) {
+        let comp = completion(text);
+        suggest.textContent = comp ? comp : '';
+    }
+
+    inp.addEventListener('keydown', async (e) => {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            let comp = completion(inp.value);
+            if (comp) inp.value = comp;
+            showSuggestion(inp.value);
+        } else if (e.key === 'Enter') {
+            let raw = inp.value.trim();
+            inp.value = '';
+            suggest.textContent = '';
+            if (!raw) return;
+            await execute(raw);
+        }
+    });
+
+    inp.addEventListener('input', () => showSuggestion(inp.value));
+
+    async function execute(raw) {
+        log('> ' + raw);
+        let viaExact = await resolveNames(raw);
+        let viaPrefix = autoCompleteNames(viaExact);
+        if (viaPrefix !== viaExact) log('(partial name resolved)');
+        raw = viaPrefix;
+
+        if (raw.startsWith('@') && raw.indexOf(' ') === -1) {
+            raw = 'read ' + raw;
+        }
+
+        let space = raw.indexOf(' ');
+        let cmd = space < 0 ? raw.toLowerCase() : raw.slice(0, space).toLowerCase();
+        let rest = space < 0 ? '' : raw.slice(space+1).trim();
+
+        if (cmd === 'create' || cmd === 'update') {
+            let isUpdate = cmd === 'update';
+            let id = '';
+            let remainder = rest;
+            if (isUpdate) {
+                let firstSpace = rest.indexOf(' ');
+                id = firstSpace < 0 ? rest : rest.slice(0, firstSpace);
+                remainder = firstSpace < 0 ? '' : rest.slice(firstSpace+1).trim();
+            }
+            let tokens = tokenize(remainder);
+            let { tags, load } = parseTagsAndLoad(tokens);
+            let headers = new Headers();
+            if (tags) headers.set('x-tags', tags);
+            let url = isUpdate ? '/entities/' + id : '/entities';
+            let method = isUpdate ? 'PUT' : 'POST';
+            let res = await fetch(url, { method, headers, body: load });
+            if (res.headers.has('x-entity-id')) {
+                let newId = res.headers.get('x-entity-id');
+                let newTags = res.headers.get('x-entity-tags') || '';
+                let loadText = await res.text();
+                log('id:' + newId);
+                log('tags:' + newTags);
+                log('load:' + loadText);
+                if (!isUpdate) {
+                    let createdTags = {};
+                    newTags.split(',').forEach(pair => {
+                        let eq = pair.indexOf('=');
+                        if (eq > 0) createdTags[pair.slice(0,eq)] = pair.slice(eq+1);
+                    });
+                    if (createdTags['name']) {
+                        let name = createdTags['name'];
+                        let nameHeaders = new Headers();
+                        nameHeaders.set('x-tags', 'kind=name,name=' + name + ',target=' + newId);
+                        await fetch('/entities', { method: 'POST', headers: nameHeaders });
+                        addName(name);
+                        log('(name registered: ' + name + ')');
+                    }
+                }
+            } else {
+                log(res.status + ' ' + res.statusText);
+            }
+        } else if (cmd === 'read' && rest) {
+            let id = rest.split(/\s/)[0];
+            let res = await fetch('/entities/' + id);
+            if (res.headers.has('x-entity-id')) {
+                log('id:' + res.headers.get('x-entity-id'));
+                log('tags:' + (res.headers.get('x-entity-tags') || ''));
+                log('load:' + await res.text());
+            } else {
+                log(res.status + ' ' + res.statusText);
+            }
+        } else if (cmd === 'query') {
+            let query = rest.replace(/"/g, '').replace(/\s+/g, '&');
+            let res = await fetch('/entities?' + query);
+            let text = await res.text();
+            log(text.trim());
+        } else if (cmd === 'delete' && rest) {
+            let id = rest.split(/\s/)[0];
+            let res = await fetch('/entities/' + id, { method: 'DELETE' });
+            log(res.status + ' ' + res.statusText);
+            await fetchNames();
+        } else if (cmd === 'ws') {
+            let ws = new WebSocket('ws://' + location.host + '/ws');
+            ws.onopen = () => log('websocket connected');
+            ws.onmessage = (msg) => {
+                if (msg.data.startsWith('ev ')) {
+                    log('push: ' + msg.data.slice(3));
+                }
+            };
+            ws.onclose = () => log('websocket closed');
+            ws.onerror = () => log('websocket error');
+            window._ws = ws;
+        } else if (cmd === 'sub' && window._ws) {
+            let filter = rest.replace(/"/g, '').replace(/\s+/g, '&');
+            window._ws.send(filter);
+        } else if (cmd === 'help') {
+            log('create key=val ... [load]\nread <id>\nquery key=val[&...]\nupdate <id> key=val... [load]\ndelete <id>\nws\nsub key=val[&...]');
+        } else {
+            log('unknown command (type help)');
+        }
+    }
+
+    fetchNames();
+    log('morce terminal — type help');
+    log('tab to autocomplete, @names auto-resolve on enter, "@name" alone = read');
+</script>
+</body>
+</html>

@@ -36,29 +36,27 @@ impl Hub {
     }
 
     pub fn publish(&self, entity: &Entity) {
-        if let Some(json) = entity.json() {
-            let dead: Vec<Uuid> = self.subs
-                .iter()
-                .filter_map(|entry| {
-                    let sub = entry.value();
-                    if matches_predicate(&json, &sub.predicate) {
-                        if sub.sender.send(entity.clone()).is_err() {
-                            return Some(*entry.key());
-                        }
+        let dead: Vec<Uuid> = self.subs
+            .iter()
+            .filter_map(|entry| {
+                let sub = entry.value();
+                if matches_predicate(&entity.tags, &sub.predicate) {
+                    if sub.sender.send(entity.clone()).is_err() {
+                        return Some(*entry.key());
                     }
-                    None
-                })
-                .collect();
-            for id in dead {
-                self.subs.remove(&id);
-            }
+                }
+                None
+            })
+            .collect();
+        for id in dead {
+            self.subs.remove(&id);
         }
     }
 }
 
-fn matches_predicate(json: &serde_json::Value, predicate: &Predicate) -> bool {
+fn matches_predicate(tags: &std::collections::BTreeMap<String, String>, predicate: &Predicate) -> bool {
     for (key, val) in predicate {
-        match json.get(key) {
+        match tags.get(key) {
             Some(v) if v == val => continue,
             _ => return false,
         }

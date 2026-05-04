@@ -3,7 +3,7 @@ use actix_ws;
 use futures_util::StreamExt;
 
 use crate::api::State;
-use crate::predicate::Predicate;
+use crate::parse;
 
 pub async fn handler(
     req: HttpRequest,
@@ -18,25 +18,22 @@ pub async fn handler(
         while let Some(Ok(msg)) = msg_stream.next().await {
             match msg {
                 actix_ws::Message::Text(text) => {
-                    if let Ok(predicate) = serde_json::from_str::<Predicate>(&text) {
-                        if let Some(id) = sub_id {
-                            hub.unsubscribe(id);
-                        }
-                        let (id, mut rx) = hub.subscribe(predicate);
-                        sub_id = Some(id);
-                        let mut sender = session.clone();
-                        actix_web::rt::spawn(async move {
-                            while let Some(entity) = rx.recv().await {
-                                if let Ok(json) = serde_json::to_string(&serde_json::json!({
-                                    "type": "entity",
-                                    "id": entity.id.to_string(),
-                                    "load": serde_json::to_value(&*entity.load).unwrap_or_default(),
-                                })) {
-                                    let _ = sender.text(json).await;
-                                }
-                            }
-                        });
+                    let predicate = parse::predicate(&text);
+                    if predicate.is_empty() {
+                        continue;
                     }
+                    if let Some(id) = sub_id {
+                        hub.unsubscribe(id);
+                    }
+                    let (id, mut rx) = hub.subscribe(predicate);
+                    sub_id = Some(id);
+                    let mut sender = session.clone();
+                    actix_web::rt::spawn(async move {
+                        while let Some(entity) = rx.recv().await {
+                            let text = format!("ev {}", entity.id);
+                            let _ = sender.text(text).await;
+                        }
+                    });
                 }
                 actix_ws::Message::Close(_) => break,
                 _ => {}

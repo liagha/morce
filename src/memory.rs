@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use dashmap::DashMap;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::entity::Entity;
@@ -21,22 +22,18 @@ impl Memory {
     }
 
     fn update_index(&self, entity: &Entity) {
-        if let Some(json) = entity.json() {
-            self.index.insert(entity.id, &json);
-        }
+        self.index.insert(entity.id, &entity.tags);
     }
 
     fn remove_index(&self, entity: &Entity) {
-        if let Some(json) = entity.json() {
-            self.index.remove(entity.id, &json);
-        }
+        self.index.remove(entity.id, &entity.tags);
     }
 }
 
 #[async_trait]
 impl Store for Memory {
-    async fn create(&self, load: bytes::Bytes) -> Result<Entity, Error> {
-        let entity = Entity::new(load);
+    async fn create(&self, load: bytes::Bytes, tags: BTreeMap<String, String>) -> Result<Entity, Error> {
+        let entity = Entity::new(load, tags);
         self.items.insert(entity.id, entity.clone());
         self.update_index(&entity);
         Ok(entity)
@@ -46,10 +43,11 @@ impl Store for Memory {
         Ok(self.items.get(&id).map(|e| e.clone()))
     }
 
-    async fn update(&self, id: Uuid, load: bytes::Bytes) -> Result<Entity, Error> {
+    async fn update(&self, id: Uuid, load: bytes::Bytes, tags: BTreeMap<String, String>) -> Result<Entity, Error> {
         let mut entity = self.items.get_mut(&id).ok_or(Error::NotFound)?;
         self.remove_index(&entity);
         entity.load = load;
+        entity.tags = tags;
         self.update_index(&entity);
         Ok(entity.clone())
     }
@@ -76,10 +74,8 @@ impl Store for Memory {
             let mut result = Vec::new();
             for entry in self.items.iter() {
                 let entity = entry.value();
-                if let Some(json) = entity.json() {
-                    if matches_predicate(&json, predicate) {
-                        result.push(entity.clone());
-                    }
+                if matches_predicate(&entity.tags, predicate) {
+                    result.push(entity.clone());
                 }
             }
             Ok(result)
@@ -87,9 +83,9 @@ impl Store for Memory {
     }
 }
 
-fn matches_predicate(json: &serde_json::Value, predicate: &Predicate) -> bool {
+fn matches_predicate(tags: &BTreeMap<String, String>, predicate: &Predicate) -> bool {
     for (key, val) in predicate {
-        match json.get(key) {
+        match tags.get(key) {
             Some(v) if v == val => continue,
             _ => return false,
         }

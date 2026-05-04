@@ -1,32 +1,48 @@
 use actix_web::{web, HttpRequest, HttpResponse};
-use bytes::Bytes;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::hub::Hub;
 use crate::memory::Memory;
 use crate::predicate::Predicate;
 use crate::store::Store;
+use crate::format;
+use crate::parse;
 
 pub struct State {
     pub store: std::sync::Arc<Memory>,
     pub hub: std::sync::Arc<Hub>,
 }
 
-#[derive(serde::Deserialize)]
-pub struct CreatePayload {
-    pub load: serde_json::Value,
+fn extract_tags(req: &HttpRequest) -> BTreeMap<String, String> {
+    if let Some(header) = req.headers().get("x-tags") {
+        if let Ok(val) = header.to_str() {
+            return parse::tags(val);
+        }
+    }
+    BTreeMap::new()
+}
+
+fn tags_header(tags: &BTreeMap<String, String>) -> String {
+    let mut parts = Vec::new();
+    for (k, v) in tags {
+        parts.push(format!("{}={}", k, v));
+    }
+    parts.join(",")
 }
 
 pub async fn create(
     state: web::Data<State>,
-    body: web::Json<CreatePayload>,
+    req: HttpRequest,
+    body: web::Bytes,
 ) -> actix_web::Result<HttpResponse> {
-    let bytes: Bytes = serde_json::to_vec(&body.load)
-        .map_err(|e| actix_web::error::ErrorBadRequest(e.to_string()))?
-        .into();
-    let entity = state.store.create(bytes).await?;
+    let tags = extract_tags(&req);
+    let entity = state.store.create(body, tags).await?;
     state.hub.publish(&entity);
-    Ok(HttpResponse::Ok().json(&entity))
+    Ok(HttpResponse::Created()
+        .insert_header(("x-entity-id", entity.id.to_string()))
+        .insert_header(("x-entity-tags", tags_header(&entity.tags)))
+        .body(entity.load.clone()))
 }
 
 pub async fn read(
@@ -35,7 +51,10 @@ pub async fn read(
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
     if let Some(entity) = state.store.read(id).await? {
-        Ok(HttpResponse::Ok().json(&entity))
+        Ok(HttpResponse::Ok()
+            .insert_header(("x-entity-id", entity.id.to_string()))
+            .insert_header(("x-entity-tags", tags_header(&entity.tags)))
+            .body(entity.load))
     } else {
         Err(actix_web::error::ErrorNotFound("not found"))
     }
@@ -44,15 +63,17 @@ pub async fn read(
 pub async fn update(
     state: web::Data<State>,
     path: web::Path<Uuid>,
-    body: web::Json<CreatePayload>,
+    req: HttpRequest,
+    body: web::Bytes,
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
-    let bytes: Bytes = serde_json::to_vec(&body.load)
-        .map_err(|e| actix_web::error::ErrorBadRequest(e.to_string()))?
-        .into();
-    let entity = state.store.update(id, bytes).await?;
+    let tags = extract_tags(&req);
+    let entity = state.store.update(id, body, tags).await?;
     state.hub.publish(&entity);
-    Ok(HttpResponse::Ok().json(&entity))
+    Ok(HttpResponse::Ok()
+        .insert_header(("x-entity-id", entity.id.to_string()))
+        .insert_header(("x-entity-tags", tags_header(&entity.tags)))
+        .body(entity.load))
 }
 
 pub async fn delete(
@@ -73,12 +94,10 @@ pub async fn query(
         let mut split = part.splitn(2, '=');
         Some((split.next()?.to_string(), split.next()?.to_string()))
     }) {
-        if let Ok(parsed) = serde_json::from_str(&val) {
-            predicate.insert(key, parsed);
-        } else {
-            predicate.insert(key, serde_json::Value::String(val));
-        }
+        predicate.insert(key, val);
     }
     let entities = state.store.query(&predicate).await?;
-    Ok(HttpResponse::Ok().json(&entities))
+    Ok(HttpResponse::Ok()
+        .content_type("text/plain; charset=utf-8")
+        .body(format::entity_list(&entities)))
 }

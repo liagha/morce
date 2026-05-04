@@ -302,9 +302,6 @@ name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "bytestring"
@@ -931,13 +928,11 @@ dependencies = [
  "actix-rt",
  "actix-web",
  "actix-ws",
- "anyhow",
  "async-trait",
+ "base64",
  "bytes",
  "dashmap",
  "futures-util",
- "serde",
- "serde_json",
  "tokio",
  "uuid",
 ]
@@ -1151,7 +1146,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
- "serde_derive",
 ]
 
 [[package]]
