@@ -1,0 +1,1 @@
+pub type Predicate = std::collections::BTreeMap<String, serde_json::Value>;
