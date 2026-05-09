@@ -12,8 +12,6 @@
         .prompt { color: #0f0; margin-right: 8px; user-select: none; }
         #input { background: transparent; border: none; color: #0f0; font-family: 'Courier New', monospace; font-size: 14px; flex: 1; outline: none; }
         #suggest { color: #0a0; font-size: 13px; padding: 4px 12px; border-top: 1px solid #1a1a1a; min-height: 22px; max-height: 40px; overflow-y: auto; }
-
-        /* Syntax highlighting */
         .syn-cmd { color: #00ff00; font-weight: bold; }
         .syn-key { color: #00ccff; }
         .syn-val { color: #ffaa00; }
@@ -22,8 +20,6 @@
         .syn-error { color: #ff4444; font-weight: bold; }
         .syn-info { color: #888888; }
         .syn-success { color: #44ff44; }
-
-        /* File upload */
         #drop-zone {
             position: fixed;
             top: 0;
@@ -48,8 +44,6 @@
             font-family: 'Courier New', monospace;
             font-size: 18px;
         }
-
-        /* Scrollbar styling */
         #output::-webkit-scrollbar {
             width: 8px;
         }
@@ -75,12 +69,10 @@
     const inp = document.getElementById('input');
     const dropZone = document.getElementById('drop-zone');
 
-    // Command history
     let history = [];
     let historyIndex = -1;
     let currentInput = '';
 
-    // Load history from localStorage
     try {
         const saved = localStorage.getItem('morce_history');
         if (saved) history = JSON.parse(saved);
@@ -90,7 +82,6 @@
         if (cmd && (history.length === 0 || history[history.length-1] !== cmd)) {
             history.push(cmd);
             if (history.length > 1000) history.shift();
-            // Save to localStorage
             try {
                 localStorage.setItem('morce_history', JSON.stringify(history));
             } catch(e) {}
@@ -98,18 +89,12 @@
         historyIndex = history.length;
     }
 
-    // Syntax highlighting for output
     function log(text, className) {
         if (className) {
             out.innerHTML += `<span class="${className}">${escapeHtml(text)}</span>\n`;
         } else {
-            // Auto-highlight based on content
             let highlighted = escapeHtml(text);
-
-            // Highlight IDs
             highlighted = highlighted.replace(/^id:(.+)$/gm, '<span class="syn-id">id:$1</span>');
-
-            // Highlight tags
             highlighted = highlighted.replace(/^tags:(.+)$/gm, (match, tags) => {
                 const parts = tags.split(',').map(pair => {
                     const eq = pair.indexOf('=');
@@ -122,15 +107,10 @@
                 });
                 return 'tags:' + parts.join(',');
             });
-
-            // Highlight load
             highlighted = highlighted.replace(/^load:(.+)$/gm, '<span class="syn-load">load:$1</span>');
-
-            // Highlight errors
             if (text.includes('error') || text.includes('Error') || text.includes('not found') || text.includes('Forbidden')) {
                 highlighted = `<span class="syn-error">${highlighted}</span>`;
             }
-
             out.innerHTML += highlighted + '\n';
         }
         out.scrollTop = out.scrollHeight;
@@ -183,8 +163,8 @@
         try {
             let resp = await fetch('/entities?kind=name');
             let text = await resp.text();
-            let lines = text.split('\n');
             names = [];
+            let lines = text.split('\n');
             for (let line of lines) {
                 if (line.startsWith('tags:')) {
                     let tagPart = line.slice(5);
@@ -204,35 +184,36 @@
         if (!names.includes(name)) names.push(name);
     }
 
+    async function resolveName(name) {
+        try {
+            let query = 'kind=name&name=' + name;
+            let resp = await fetch('/entities?' + query);
+            let text = await resp.text();
+            if (!text.trim()) return null;
+            let lines = text.split('\n');
+            for (let line of lines) {
+                if (line.startsWith('id:')) {
+                    return line.slice(3).trim();
+                }
+            }
+        } catch (e) {}
+        return null;
+    }
+
     async function resolveNames(raw) {
         let pattern = /@(\w[\w-]*)/g;
         let matches = [...raw.matchAll(pattern)];
+        if (matches.length === 0) return raw;
+
         let resolved = raw;
         for (let match of matches) {
             let name = match[1];
-            try {
-                let query = 'kind=name&name=' + name;
-                let resp = await fetch('/entities?' + query);
-                let text = await resp.text();
-                let lines = text.split('\n');
-                let target = null;
-                for (let line of lines) {
-                    if (line.startsWith('tags:')) {
-                        let tagPart = line.slice(5);
-                        let pairs = tagPart.split(',');
-                        for (let pair of pairs) {
-                            let eq = pair.indexOf('=');
-                            if (eq > 0) {
-                                let k = pair.slice(0, eq);
-                                let v = pair.slice(eq+1);
-                                if (k === 'target') { target = v; break; }
-                            }
-                        }
-                    }
-                    if (target) break;
-                }
-                if (target) { resolved = resolved.replace(match[0], target); }
-            } catch (e) {}
+            let id = await resolveName(name);
+            if (id) {
+                resolved = resolved.replace(match[0], id);
+            } else {
+                log(`(name '${name}' not found)`, 'syn-info');
+            }
         }
         return resolved;
     }
@@ -293,7 +274,6 @@
         }
     }
 
-    // File upload handling
     let pendingFile = null;
 
     document.addEventListener('dragover', (e) => {
@@ -328,26 +308,14 @@
     }
 
     async function uploadFile(file, tags) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = async () => {
-                try {
-                    const headers = new Headers();
-                    if (tags) headers.set('x-tags', tags);
-
-                    const res = await fetch('/entities', {
-                        method: 'POST',
-                        headers,
-                        body: reader.result
-                    });
-                    resolve(res);
-                } catch (e) {
-                    reject(e);
-                }
-            };
-            reader.onerror = reject;
-            reader.readAsArrayBuffer(file);
+        const headers = new Headers();
+        if (tags) headers.set('x-tags', tags);
+        const res = await fetch('/entities', {
+            method: 'POST',
+            headers,
+            body: file
         });
+        return res;
     }
 
     inp.addEventListener('keydown', async (e) => {
@@ -392,7 +360,6 @@
     async function execute(raw) {
         logCommand(raw);
 
-        // Handle upload command
         if (raw.startsWith('upload ')) {
             if (!pendingFile) {
                 log('No file selected. Drag and drop a file first.', 'syn-error');
@@ -400,7 +367,13 @@
             }
 
             const rest = raw.slice(7).trim();
-            const tokens = tokenize(rest);
+
+            let tokens;
+            if (rest === pendingFile.name || rest === '') {
+                tokens = [];
+            } else {
+                tokens = tokenize(rest);
+            }
             const { tags } = parseTagsAndLoad(tokens);
 
             log(`Uploading ${pendingFile.name}...`, 'syn-info');
@@ -444,7 +417,14 @@
         raw = viaPrefix;
 
         if (raw.startsWith('@') && raw.indexOf(' ') === -1) {
-            raw = 'read ' + raw;
+            let name = raw.slice(1);
+            let id = await resolveName(name);
+            if (id) {
+                raw = 'read ' + id;
+            } else {
+                log(`Name '${name}' not found`, 'syn-error');
+                return;
+            }
         }
 
         let space = raw.indexOf(' ');

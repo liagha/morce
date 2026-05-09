@@ -32,15 +32,25 @@ fn tags_header(tags: &BTreeMap<String, String>) -> String {
     parts.join(",")
 }
 
+fn extract_filename(req: &HttpRequest) -> Option<String> {
+    req.headers().get("x-filename")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+}
+
 pub async fn create(
     state: web::Data<State>,
     req: HttpRequest,
     body: web::Bytes,
 ) -> actix_web::Result<HttpResponse> {
-    let tags = extract_tags(&req);
+    let mut tags = extract_tags(&req);
     let resource = tags.get("in").and_then(|v| v.parse::<Uuid>().ok());
     let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok());
     guard::check(&*state.store, auth_header, "create", resource).await?;
+
+    if let Some(filename) = extract_filename(&req) {
+        tags.entry("filename".into()).or_insert(filename);
+    }
 
     let entity = state.store.create(body, tags).await?;
     state.hub.publish(&entity);
@@ -72,9 +82,13 @@ pub async fn update(
     body: web::Bytes,
 ) -> actix_web::Result<HttpResponse> {
     let id = path.into_inner();
-    let tags = extract_tags(&req);
+    let mut tags = extract_tags(&req);
     let auth_header = req.headers().get("Authorization").and_then(|v| v.to_str().ok());
     guard::check(&*state.store, auth_header, "update", Some(id)).await?;
+
+    if let Some(filename) = extract_filename(&req) {
+        tags.entry("filename".into()).or_insert(filename);
+    }
 
     let entity = state.store.update(id, body, tags).await?;
     state.hub.publish(&entity);
